@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var timer: Timer?
     var actions: [MenuAction] = []
     var children: [String: (Process, FileHandle)] = [:]
+    var phase = 0
 
     init(root: URL) { self.root = root }
 
@@ -53,7 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let instances = loadInstances(root: root)
         let live = instances.filter { $0.isLive() }
-        item.button?.title = live.isEmpty ? "π" : "π \(live.count)"
+        phase = (phase + 1) % 4
+        item.button?.title = menubarTitle(instances, phase: phase)
         item.button?.toolTip = "Pi Overview · \(live.filter { $0.busy }.count) busy · \(live.filter { !$0.busy }.count) waiting"
         try? writeJSON(["pid": Double(ProcessInfo.processInfo.processIdentifier), "heartbeatAt": nowMillis()], to: root.appendingPathComponent("daemon.json"))
         let command = root.appendingPathComponent("daemon-command.json")
@@ -74,19 +76,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
         for info in instances.prefix(30) {
             let live = info.isLive()
-            let symbol = live ? (info.busy ? "●" : "○") : "✓"
-            let heading = entry("\(symbol) \(displayText(info.sessionName ?? info.projectName, limit: 60)) · \(displayText(live || info.closed ? info.status : "Disconnected", limit: 50))")
+            let symbol = agentSymbol(info, phase: phase)
+            let badges = badgeText(info)
+            let name = displayText(info.sessionName ?? info.projectName, limit: 60)
+            let status = displayText(live || info.closed ? info.status : "Disconnected", limit: 50)
+            let heading = entry("\(symbol) \(name) · \(status)" + (badges.isEmpty ? "" : " " + badges))
             let submenu = NSMenu()
             submenu.autoenablesItems = false
+            submenu.addItem(entry("\(symbol) \(status)", enabled: false))
             submenu.addItem(entry(displayText(info.cwd, limit: 180), enabled: false))
             submenu.addItem(entry("PID \(info.pid) · \(info.id.prefix(8))", enabled: false))
-            submenu.addItem(entry(info.lastOutput.isEmpty ? "No assistant output yet" : displayText(info.lastOutput), enabled: false))
+            submenu.addItem(entry(info.lastOutput.isEmpty ? "No assistant output yet" : displayText(info.lastOutput, limit: 60), enabled: false))
             if !info.lastOutput.isEmpty {
                 submenu.addItem(entry("Copy Output Preview") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(info.lastOutput, forType: .string)
                 })
             }
+            addContributions(info, to: submenu)
             submenu.addItem(.separator())
             submenu.addItem(entry("Open Project in Terminal") { [weak self] in self?.openTerminal(info, resume: false) })
             submenu.addItem(entry("Resume This Session in Terminal", enabled: canResume(info, among: instances)) { [weak self] in self?.openTerminal(info, resume: true) })
@@ -113,6 +120,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         menu.addItem(entry("Open Overview Folder") { [weak self] in if let root = self?.root { NSWorkspace.shared.open(root) } })
         menu.addItem(entry("Quit Menu Bar (Keep Pi Running)") { NSApp.terminate(nil) })
+    }
+
+    func addContributions(_ info: InstanceInfo, to menu: NSMenu) {
+        let sections = (info.contributions ?? []).prefix(4).flatMap { $0.sections.prefix(3) }.filter { !$0.items.isEmpty }
+        guard !sections.isEmpty else { return }
+        menu.addItem(.separator())
+        for section in sections {
+            let heading = entry(displayText(section.title, limit: 40))
+            let list = NSMenu()
+            list.autoenablesItems = false
+            for value in section.items.prefix(20) {
+                let row = entry("\(itemSymbol(value.state, phase: phase)) \(displayText(value.title, limit: 80))", enabled: !(value.detail ?? "").isEmpty)
+                if let detail = value.detail, !detail.isEmpty {
+                    let details = NSMenu()
+                    details.autoenablesItems = false
+                    details.addItem(entry(displayText(detail, limit: 120), enabled: false))
+                    row.submenu = details
+                }
+                list.addItem(row)
+            }
+            heading.submenu = list
+            menu.addItem(heading)
+        }
     }
 
     func entry(_ title: String, enabled: Bool = true, action: (() -> Void)? = nil) -> NSMenuItem {

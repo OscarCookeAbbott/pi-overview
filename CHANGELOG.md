@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Include the updated native renderer for state indicators, short output previews and contributed badges/menus alongside the publisher API.
+
 ## 0.2.0
 
 - Default new-agent folder selection to home, with configurable defaultDirectory and tilde/session-relative paths.

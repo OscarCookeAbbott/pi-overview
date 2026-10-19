@@ -1,6 +1,21 @@
 import Foundation
 import Darwin
 
+struct OverviewItem: Codable {
+    let title: String
+    let state: String?
+    let detail: String?
+}
+struct OverviewSection: Codable {
+    let title: String
+    let items: [OverviewItem]
+}
+struct OverviewContribution: Codable {
+    let id: String
+    let badge: String
+    let sections: [OverviewSection]
+}
+
 struct InstanceInfo: Codable {
     var version = 1
     var id: String
@@ -17,6 +32,7 @@ struct InstanceInfo: Codable {
     var lastOutput: String
     var updatedAt: Double
     var heartbeatAt: Double
+    var contributions: [OverviewContribution]? = nil
 
     var processAlive: Bool {
         guard pid > 0 else { return false }
@@ -30,7 +46,7 @@ struct InstanceInfo: Codable {
 
     static func read(_ url: URL) -> InstanceInfo? {
         guard url.pathExtension == "json",
-              let values = try? url.resourceValues(forKeys: [.fileSizeKey]), (values.fileSize ?? 65537) <= 65536,
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]), (values.fileSize ?? 262145) <= 262144,
               let data = try? Data(contentsOf: url),
               let info = try? JSONDecoder().decode(InstanceInfo.self, from: data),
               info.version == 1, UUID(uuidString: info.id) != nil, UUID(uuidString: info.token) != nil,
@@ -71,6 +87,43 @@ func nowMillis() -> Double { Date().timeIntervalSince1970 * 1000 }
 func displayText(_ text: String, limit: Int = 160) -> String {
     String(text.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }.joined().prefix(limit))
 }
+func itemSymbol(_ state: String?, phase: Int = 0) -> String {
+    switch state {
+    case "running": return ["◐", "◓", "◑", "◒"][phase % 4]
+    case "complete": return "✓"
+    case "failed": return "✕"
+    case "waiting": return "…"
+    case "cancelled": return "⊘"
+    case "pending": return "○"
+    default: return "•"
+    }
+}
+func agentSymbol(_ info: InstanceInfo, phase: Int = 0) -> String {
+    if !info.isLive() && !info.closed { return "?" }
+    if info.busy { return itemSymbol("running", phase: phase) }
+    if info.status.hasPrefix("Error") || info.status == "Launch failed" { return "✕" }
+    if info.status == "Completed" { return "✓" }
+    if info.status == "Aborted" || info.status == "Closed" || info.status == "Exited" { return "⊘" }
+    return "○"
+}
+func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
+    let live = instances.filter { $0.isLive() }
+    guard !live.isEmpty else { return "π" }
+    let running = live.filter { $0.busy }.count
+    let completed = live.filter { !$0.busy && $0.status == "Completed" }.count
+    let failed = live.filter { !$0.busy && $0.status.hasPrefix("Error") }.count
+    let waiting = live.count - running - completed - failed
+    var counts: [String] = []
+    if running > 0 { counts.append("\(itemSymbol("running", phase: phase)) \(running)") }
+    if completed > 0 { counts.append("✓ \(completed)") }
+    if failed > 0 { counts.append("✕ \(failed)") }
+    if waiting > 0 { counts.append("○ \(waiting)") }
+    return "π · " + counts.joined(separator: " ")
+}
+func badgeText(_ info: InstanceInfo) -> String {
+    (info.contributions ?? []).prefix(4).filter { !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
+}
+
 func shellQuote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 func terminalCommand(cwd: String, arguments: [String]) -> String {
     "cd -- " + shellQuote(cwd) + (arguments.isEmpty ? "" : " && exec " + arguments.map(shellQuote).joined(separator: " "))
