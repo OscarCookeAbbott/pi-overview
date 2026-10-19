@@ -1,0 +1,26 @@
+{
+  "name": "@oscar-robin/pi-overview",
+  "version": "0.1.0",
+  "description": "A native macOS menu bar overview and manager for Pi instances.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Oscar Cooke-Abbott",
+  "repository": { "type": "git", "url": "git+https://github.com/OscarCookeAbbott/pi-overview.git" },
+  "homepage": "https://github.com/OscarCookeAbbott/pi-overview#readme",
+  "bugs": { "url": "https://github.com/OscarCookeAbbott/pi-overview/issues" },
+  "keywords": ["pi-package", "pi-extension", "macos", "menubar", "overview"],
+  "files": ["src/", "native/", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"],
+  "pi": { "extensions": ["./src/index.ts"] },
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.ts && node scripts/test-native.mjs",
+    "prepack": "npm run check && npm test"
+  },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@types/node": "22.19.19",
+    "typescript": "7.0.2"
+  }
+}
