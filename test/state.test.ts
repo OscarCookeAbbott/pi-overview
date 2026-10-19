@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { atomicJSON, InstancePublisher, preview, readConfig } from "../src/state.ts";
@@ -12,9 +12,11 @@ function setup(t: TestContext) {
 }
 
 test("configuration is strict and previews are bounded Unicode text without terminal controls", () => {
-  assert.deepEqual(readConfig({}), { enabled: true, autoStart: true, showOutput: true });
-  assert.deepEqual(readConfig({ overview: { autoStart: false } }), { enabled: true, autoStart: false, showOutput: true });
-  for (const overview of [null, [], "yes", { enabled: "no" }, { unknown: true }]) assert.throws(() => readConfig({ overview }), /overview/);
+  assert.deepEqual(readConfig({}), { enabled: true, autoStart: true, showOutput: true, defaultDirectory: homedir() });
+  assert.deepEqual(readConfig({ overview: { autoStart: false } }), { enabled: true, autoStart: false, showOutput: true, defaultDirectory: homedir() });
+  assert.equal(readConfig({ overview: { defaultDirectory: "~/work" } }).defaultDirectory, join(homedir(), "work"));
+  assert.equal(readConfig({ overview: { defaultDirectory: "project" } }, "/tmp/base").defaultDirectory, "/tmp/base/project");
+  for (const overview of [null, [], "yes", { enabled: "no" }, { unknown: true }, { defaultDirectory: " " }, { defaultDirectory: false }]) assert.throws(() => readConfig({ overview }), /overview/);
   assert.equal(preview("\x1b[31mHello\x1b[0m\nworld\x07"), "Hello world");
   assert.equal([...preview("🥧".repeat(500))].length, 400);
 });

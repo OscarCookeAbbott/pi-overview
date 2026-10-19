@@ -2,21 +2,30 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { homedir } from "node:os";
+import type { OverviewContribution } from "./contributions.ts";
 
 export interface OverviewConfig {
   enabled: boolean;
   autoStart: boolean;
   showOutput: boolean;
+  defaultDirectory: string;
 }
 
-export function readConfig(settings: unknown): OverviewConfig {
+export function readConfig(settings: unknown, cwd = process.cwd()): OverviewConfig {
   const raw = (settings as { overview?: unknown } | undefined)?.overview;
-  const config = { enabled: true, autoStart: true, showOutput: true };
+  const config = { enabled: true, autoStart: true, showOutput: true, defaultDirectory: homedir() };
   if (raw === undefined) return config;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overview must be an object.");
   for (const [key, value] of Object.entries(raw)) {
-    if (!Object.hasOwn(config, key) || typeof value !== "boolean") throw new Error("overview accepts only boolean enabled, autoStart and showOutput settings.");
-    config[key as keyof OverviewConfig] = value;
+    if (key === "defaultDirectory") {
+      if (typeof value !== "string" || !value.trim()) throw new Error("overview.defaultDirectory must be a nonblank path.");
+      const path = value === "~" ? homedir() : value.startsWith("~/") ? join(homedir(), value.slice(2)) : value;
+      config.defaultDirectory = resolve(cwd, path);
+    } else if (key === "enabled" || key === "autoStart" || key === "showOutput") {
+      if (typeof value !== "boolean") throw new Error(`overview.${key} must be a boolean.`);
+      config[key] = value;
+    } else throw new Error(`Unknown overview setting: ${key}`);
   }
   return config;
 }
@@ -56,11 +65,12 @@ export interface InstanceSnapshot {
   busy: boolean;
   closed: boolean;
   lastOutput: string;
+  contributions?: OverviewContribution[];
   updatedAt: number;
   heartbeatAt: number;
 }
 
-type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput">>;
+type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "contributions">>;
 export type ControlAction = "abort" | "shutdown";
 
 export class InstancePublisher {

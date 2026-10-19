@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { PI_OVERVIEW_KEY, type OverviewService } from "../src/contributions.ts";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -14,7 +15,11 @@ test("Pi loads one extension even when also explicitly requested, without starti
   const oldRoot = process.env.PI_OVERVIEW_DIR;
   process.env.PI_OVERVIEW_DIR = join(directory, "overview");
   const listeners = process.listenerCount("exit");
+  const globals = globalThis as Record<symbol, unknown>;
+  const previous = globals[PI_OVERVIEW_KEY];
   t.after(async () => {
+    if (previous === undefined) delete globals[PI_OVERVIEW_KEY];
+    else globals[PI_OVERVIEW_KEY] = previous;
     if (oldRoot === undefined) delete process.env.PI_OVERVIEW_DIR;
     else process.env.PI_OVERVIEW_DIR = oldRoot;
     await rm(directory, { recursive: true, force: true });
@@ -33,4 +38,5 @@ test("Pi loads one extension even when also explicitly requested, without starti
   assert.deepEqual([...result.extensions[0].commands.keys()], ["overview"]);
   assert.equal(existsSync(process.env.PI_OVERVIEW_DIR), false);
   assert.equal(process.listenerCount("exit"), listeners);
+  assert.equal(typeof (globals[PI_OVERVIEW_KEY] as OverviewService).publish, "function");
 });

@@ -22,6 +22,22 @@ struct NativeTests {
         try writeJSON(info, to: file)
         expect(InstanceInfo.read(file)?.id == id, "snapshot round-trip")
         expect(info.isLive(), "fresh live process")
+        var complete = info
+        complete.busy = false
+        complete.status = "Completed"
+        expect(menubarTitle([]) == "π", "no separator without counts")
+        expect(menubarTitle([info, complete]) == "π · ◐ 1 ✓ 1", "running/completed counts have symbols and a centre dot")
+        expect(agentSymbol(complete) == "✓" && itemSymbol("failed") == "✕", "popup state symbols")
+        expect(itemSymbol("running", phase: 1) == "◓", "running spinner advances")
+        info.contributions = [
+            OverviewContribution(id: "tasks", badge: "3/6 tasks", sections: [OverviewSection(title: "Tasks", items: [
+                OverviewItem(title: "[ab] Build", state: "running", detail: "Run tests")
+            ])]),
+            OverviewContribution(id: "jobs", badge: "2 jobs", sections: [])
+        ]
+        expect(badgeText(info) == "[3/6 tasks] [2 jobs]", "inline provider badges")
+        try writeJSON(info, to: file)
+        expect(InstanceInfo.read(file)?.contributions?.count == 2, "contribution snapshot round-trip")
         expect(!info.isLive(now: info.heartbeatAt + 20000), "stale heartbeat is not live")
         expect(!canResume(info, among: [info]), "never resume a live writer")
         try requestControl(info, action: "abort", root: root)
@@ -52,6 +68,7 @@ struct NativeTests {
         let terminal = terminalCommand(cwd: "/tmp/$(touch NEVER) 'quoted'", arguments: launcher.resumeArguments(session: session.path))
         expect(terminal.contains(shellQuote(session.path)) && terminal.contains(shellQuote(launcher.node)), "Terminal resume paths are quoted data")
         expect(displayText("a\nb\u{1b}c") == "a b c", "menu control characters removed")
+        expect(displayText(String(repeating: "x", count: 100), limit: 60).count == 60, "recent output is limited to 60 characters")
         info.updatedAt = nowMillis() - 8 * 86400000
         info.heartbeatAt = info.updatedAt
         try writeJSON(info, to: file)

@@ -19,9 +19,9 @@ For local development, run `pi -e ./pi-overview/src/index.ts` from the parent di
 
 ## Menu
 
-- The title shows the number of live instances; its tooltip shows busy/waiting counts.
-- Instance submenus show project/session name, directory, PID, state and an assistant-output preview. Parallel tools are counted independently. An intermediate turn or `agent_end` never marks an agent idle: completion follows `agent_settled`.
-- **New Background Task…** asks for a project and prompt, then starts a print-mode Pi process with a unique session file and private log. Prompts go through stdin, not a shell or CLI argument expansion. No `--approve` flag is added: normal saved project trust and permission rules still apply. Headless runs cannot answer interactive login or permission dialogs; configure those beforehand and inspect the log on failure.
+- The title separates Pi from live state counts, e.g. `π · ◐ 2 ✓ 1`: a rotating circle indicates running agents, a tick indicates completed agents, a cross indicates errors, and an open circle indicates ready/waiting agents. With no live instances it is just `π`, with no separator.
+- Instance rows and submenus use state symbols and show project/session name, directory, PID and a recent assistant-output preview limited to 60 characters. Extensions can add inline badges such as `[3/6 tasks] [2 jobs]` plus hoverable sections/items. Parallel tools are counted independently. An intermediate turn or `agent_end` never marks an agent idle: completion follows `agent_settled`.
+- **New Background Task…** asks for a project (starting in the configured `defaultDirectory`, home by default) and prompt, then starts a print-mode Pi process with a unique session file and private log. Prompts go through stdin, not a shell or CLI argument expansion. No `--approve` flag is added: normal saved project trust and permission rules still apply. Headless runs cannot answer interactive login or permission dialogs; configure those beforehand and inspect the log on failure.
 - **Abort Run** asks that instance to call Pi's abort API. It leaves the Pi process available for input.
 - **Quit Pi Instance…** confirms and requests Pi's orderly shutdown, including its usual background-job cleanup. It does not send SIGTERM to a PID.
 - **Open Project in Terminal** opens a new Ghostty window in that directory, or Terminal.app if Ghostty is unavailable. It does not attach to an existing live TUI or guess a session with `--continue`.
@@ -50,12 +50,42 @@ Merge into `~/.pi/agent/settings.json` or trusted project `.pi/settings.json`, t
   "overview": {
     "enabled": true,
     "autoStart": true,
-    "showOutput": true
+    "showOutput": true,
+    "defaultDirectory": "~"
   }
 }
 ```
 
-All three settings default to `true`. `autoStart` launches the GUI only from TUI sessions; print/JSON/RPC sessions still publish state without opening a menu bar. `showOutput: false` omits future assistant previews. Existing snapshots/logs are not retroactively erased. Invalid settings warn and disable this extension for that session. On non-macOS platforms it registers only the command's unsupported-platform explanation and starts no resources.
+The three boolean settings default to `true`. `defaultDirectory` defaults to the current user's home, accepts `~`/`~/…`, and resolves relative paths against the Pi session's working directory. `autoStart` launches the GUI only from TUI sessions; print/JSON/RPC sessions still publish state without opening a menu bar. `showOutput: false` omits future assistant previews. Existing snapshots/logs are not retroactively erased. Invalid settings warn and disable this extension for that session. On non-macOS platforms it registers only the command's unsupported-platform explanation and starts no resources.
+
+## Optional overview API
+
+Other extensions can publish **read-only display data** without importing/linking this package:
+
+```ts
+const contribution = {
+  id: "example",
+  badge: "3/6 tasks", // Do not include surrounding brackets.
+  sections: [{ title: "Tasks", items: [
+    { title: "[ab] Build", state: "running", detail: "Run the build and tests" },
+    { title: "[cd] Review", state: "complete" },
+  ] }],
+};
+pi.events.emit("overview:publish", contribution);
+// Republish current data whenever overview starts, regardless of extension load order:
+const off = pi.events.on("overview:collect", () => pi.events.emit("overview:publish", contribution));
+pi.on("session_shutdown", off);
+// Remove a source when it no longer has display data:
+pi.events.emit("overview:remove", "example");
+```
+
+Also publish on your own session start and data changes. With no overview listener these events are harmless. Each source replaces only its own contribution; data belongs to that Pi instance, not every agent in the menu.
+
+For callers wanting validation results, `globalThis[Symbol.for("pi.overview")]` exposes `publish(contribution): { success, error? }` and `remove(id): void`. Resolve it when needed. The key, service and payload types are exported from `src/index.ts`. Acceptance is not a promise that a GUI is running; disabled/non-macOS sessions do not publish snapshots.
+
+Items support `running`, `complete`, `failed`, `waiting`, `pending`, `cancelled` and `unknown` states. Their optional detail appears on hover. No callbacks, commands or executable actions are serialized. Payloads are sanitised/bounded: four sources per instance, three sections per source, up to twenty items per section (with a truncation row), eighty-character item titles and 120-character details.
+
+`pi-tasks` publishes its progress badge, task states and visible notes; `pi-async-jobs` publishes running/awaiting-delivery job counts and sections using optional job titles. These integrations do not require an overview dependency and do not affect agent-facing results.
 
 ## State and privacy
 
@@ -67,14 +97,14 @@ commands/      Expiring, token-addressed abort/shutdown requests
 sessions/      Exact session files for menu-launched background tasks
 logs/          stdout/stderr logs for those tasks
 bin/           Source-hashed, locally compiled app bundles
-launcher.json  Current Node/Pi/extension paths and last project directory
+launcher.json  Current Node/Pi/extension paths and configured new-agent directory
 build.log      Compiler diagnostics on failure
 companion.log  Native companion diagnostics
 ```
 
 `PI_OVERVIEW_DIR` overrides the directory, mainly for isolated testing. Directories are owner-only and atomic JSON snapshots/requests are mode 0600. Credentials and environment values are not written into launch configuration. The companion inherits the environment of the Pi process that launched it; restart it after changing environment-based credentials or PATH.
 
-Snapshots expose directory/session metadata and up to 400 Unicode characters of the latest visible assistant text. Thinking, tool inputs and tool outputs are excluded. Background logs and normal Pi sessions can still contain sensitive material. Disable previews if necessary, and remove old logs/session files yourself when no longer needed.
+Snapshots expose directory/session metadata, accepted extension contributions and up to 400 Unicode characters of the latest visible assistant text; the popup displays only the first 60 preview characters. The built-in assistant preview excludes thinking and tool inputs/outputs. Contributions may intentionally include task/note text and untitled job command labels; `showOutput` controls only the assistant preview, not contributed data. Background logs and normal Pi sessions can still contain sensitive material. Disable previews if necessary, and remove old logs/session files yourself when no longer needed.
 
 Instances heartbeat once per second; the GUI refreshes every two seconds and treats stale/dead instances as disconnected. Control uses a fresh random runtime token and ten-second request expiry, not PID-file signalling. Shutdown cleans up timers/listeners and leaves a closed snapshot; abrupt exits are detected by stale heartbeat/process liveness. No SIGINT/SIGTERM handlers are installed or replaced.
 

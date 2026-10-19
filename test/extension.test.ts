@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import extension from "../src/index.ts";
+import { createEventBus, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import extension, { PI_OVERVIEW_KEY, type OverviewService } from "../src/index.ts";
 import { atomicJSON, type InstanceSnapshot } from "../src/state.ts";
 
 function harness(t: TestContext, overview: Record<string, unknown> = { autoStart: false }) {
@@ -13,6 +13,9 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
   const oldRoot = process.env.PI_OVERVIEW_DIR;
   process.env.PI_OVERVIEW_DIR = root;
   const handlers = new Map<string, (event: any, ctx: ExtensionContext) => any>();
+  const events = createEventBus();
+  const globals = globalThis as Record<symbol, unknown>;
+  const previousService = globals[PI_OVERVIEW_KEY];
   const notices: string[] = [];
   let command!: { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
   let aborts = 0, shutdowns = 0, idle = true;
@@ -26,18 +29,22 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
   extension({
     on: (name: string, handler: (event: any, ctx: ExtensionContext) => any) => handlers.set(name, handler),
     getSettings: () => ({ overview }),
+    events,
     registerCommand: (name: string, value: typeof command) => { assert.equal(name, "overview"); command = value; },
   } as unknown as ExtensionAPI);
   const emit = (name: string, event: unknown = {}) => handlers.get(name)?.(event, ctx);
   t.after(() => {
     emit("session_shutdown");
+    if (previousService === undefined) delete globals[PI_OVERVIEW_KEY];
+    else globals[PI_OVERVIEW_KEY] = previousService;
     assert.equal(process.listenerCount("exit"), exitListeners);
     if (oldRoot === undefined) delete process.env.PI_OVERVIEW_DIR;
     else process.env.PI_OVERVIEW_DIR = oldRoot;
     rmSync(dir, { recursive: true, force: true });
   });
   return {
-    root, ctx, notices, emit,
+    root, ctx, notices, emit, events,
+    service: globals[PI_OVERVIEW_KEY] as OverviewService,
     command: (args: string) => command.handler(args, ctx as ExtensionCommandContext),
     setIdle(value: boolean) { idle = value; },
     get aborts() { return aborts; }, get shutdowns() { return shutdowns; },
@@ -113,4 +120,24 @@ test("private mailbox requests abort/shutdown through Pi APIs; hidden previews s
   assert.equal(h.shutdowns, 1);
   h.emit("session_shutdown");
   assert.equal(h.read().closed, true);
+});
+
+test("overview contributions survive startup ordering, update/remove safely, and use the configured launch directory", macOnly, async (t) => {
+  const h = harness(t, { autoStart: false, defaultDirectory: "~/Workspace" });
+  const contribution = { id: "tasks", badge: "3/6 tasks", sections: [{ title: "Tasks", items: [{ title: "Example task", state: "running" as const }] }] };
+  h.service.publish(contribution);
+  const off = h.events.on("overview:collect", () => h.events.emit("overview:publish", contribution));
+  t.after(off);
+  await h.emit("session_start");
+  assert.equal(h.read().contributions?.[0].badge, "3/6 tasks");
+  assert.equal(JSON.parse(readFileSync(join(h.root, "launcher.json"), "utf8")).cwd, join(homedir(), "Workspace"));
+  contribution.sections[0].items[0].title = "Mutated caller data";
+  h.emit("agent_start");
+  assert.equal(h.read().contributions?.[0].sections[0].items[0].title, "Example task");
+  for (let i = 0; i < 3; i++) assert.equal(h.service.publish({ id: `extra${i}`, badge: "Badge", sections: [] }).success, true);
+  assert.equal(h.service.publish({ id: "overflow", badge: "Badge", sections: [] }).success, false);
+  h.events.emit("overview:remove", "extra0");
+  assert.equal(h.service.publish({ id: "overflow", badge: "Badge", sections: [] }).success, true);
+  h.emit("session_shutdown");
+  assert.equal((globalThis as Record<symbol, unknown>)[PI_OVERVIEW_KEY], undefined);
 });

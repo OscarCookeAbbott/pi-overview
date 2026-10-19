@@ -4,9 +4,16 @@ import { execFile } from "node:child_process";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startCompanion, writeLauncher } from "./companion.ts";
 import { atomicJSON, InstancePublisher, preview, readConfig } from "./state.ts";
+import { normalizeContribution, PI_OVERVIEW_KEY, type OverviewContribution, type OverviewService } from "./contributions.ts";
+
+export { PI_OVERVIEW_KEY } from "./contributions.ts";
+export type { OverviewContribution, OverviewItem, OverviewItemState, OverviewSection, OverviewService } from "./contributions.ts";
 
 export default function overviewExtension(pi: ExtensionAPI): void {
   const root = resolve(process.env.PI_OVERVIEW_DIR ?? join(getAgentDir(), "overview"));
+  const globals = globalThis as Record<symbol, unknown>;
+  const contributions = new Map<string, OverviewContribution>();
+  let contributionSubscriptions: Array<() => void> = [];
   const launchId = process.env.PI_OVERVIEW_LAUNCH_ID;
   // This ID belongs to this launched runtime, not Pi processes it may spawn later.
   delete process.env.PI_OVERVIEW_LAUNCH_ID;
@@ -31,9 +38,31 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     if (!publisher || !ctx) return;
     context = ctx;
     try {
-      publisher.update({ cwd: ctx.cwd, projectName: basename(ctx.cwd) || ctx.cwd, sessionFile: ctx.sessionManager.getSessionFile(), sessionName: ctx.sessionManager.getSessionName(), ...patch });
+      publisher.update({ cwd: ctx.cwd, projectName: basename(ctx.cwd) || ctx.cwd, sessionFile: ctx.sessionManager.getSessionFile(), sessionName: ctx.sessionManager.getSessionName(), contributions: [...contributions.values()], ...patch });
     } catch (error) { warn(error); }
   }
+
+  const service: OverviewService = {
+    publish(value) {
+      try {
+        const contribution = normalizeContribution(value);
+        if (!contributions.has(contribution.id) && contributions.size >= 4) return { success: false, error: "Overview supports at most four contribution sources per instance." };
+        contributions.set(contribution.id, contribution);
+        sync();
+        return { success: true };
+      } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+    },
+    remove(id) { if (contributions.delete(id)) sync(); },
+  };
+
+  function subscribeContributions(): void {
+    if (!contributionSubscriptions.length) contributionSubscriptions = [
+      pi.events.on("overview:publish", (value) => { service.publish(value as OverviewContribution); }),
+      pi.events.on("overview:remove", (id) => { if (typeof id === "string") service.remove(id); }),
+    ];
+    globals[PI_OVERVIEW_KEY] = service;
+  }
+  subscribeContributions();
 
   function cleanup(): void {
     controller.abort();
@@ -46,6 +75,10 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     context = undefined;
     tools.clear();
     startup = undefined;
+    contributionSubscriptions.forEach((off) => off());
+    contributionSubscriptions = [];
+    contributions.clear();
+    if (globals[PI_OVERVIEW_KEY] === service) delete globals[PI_OVERVIEW_KEY];
   }
 
   function start(): Promise<void> {
@@ -68,9 +101,10 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     cleanup();
     controller = new AbortController();
     context = ctx;
+    subscribeContributions();
     warned = false;
     failed = false;
-    try { config = readConfig(pi.getSettings()); } catch (error) { config = { ...readConfig({}), enabled: false }; warn(error); }
+    try { config = readConfig(pi.getSettings(), ctx.cwd); } catch (error) { config = { ...readConfig({}), enabled: false }; warn(error); }
     if (!config.enabled || process.platform !== "darwin") return;
     try {
       publisher = new InstancePublisher(root, ctx.cwd, launchId);
@@ -88,7 +122,8 @@ export default function overviewExtension(pi: ExtensionAPI): void {
         } catch (error) { warn(error); }
       }, 1000);
       timer.unref();
-      await writeLauncher(root, ctx.cwd);
+      pi.events.emit("overview:collect", undefined);
+      await writeLauncher(root, config.defaultDirectory);
       if (publisher === current && config.autoStart && ctx.mode === "tui") {
         const signal = controller.signal;
         void start().catch((error) => { if (publisher === current && !signal.aborted) warn(error); });
@@ -136,7 +171,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
       if (process.platform !== "darwin") { ctx.ui.notify("Pi Overview's native companion requires macOS.", "warning"); return; }
       if (!publisher) { ctx.ui.notify("Pi Overview is disabled or could not initialise; check overview settings and session warnings.", "warning"); return; }
       try {
-        if (action === "start") { await writeLauncher(root, ctx.cwd); await start(); ctx.ui.notify("Pi Overview launch requested. An existing companion is reused.", "info"); }
+        if (action === "start") { await writeLauncher(root, config.defaultDirectory); await start(); ctx.ui.notify("Pi Overview launch requested. An existing companion is reused.", "info"); }
         else if (action === "stop") {
           controller.abort();
           controller = new AbortController();

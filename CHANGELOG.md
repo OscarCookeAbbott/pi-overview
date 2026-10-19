@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Default new-agent folder selection to home, with configurable defaultDirectory and tilde/session-relative paths.
+- Separate Pi from symbol-labelled running/completed/error/ready counts; rotate running symbols, add popup state symbols and limit visible output previews to 60 characters.
+- Expose optional validated display-only global/event contribution APIs with inline badges and hoverable sections/items, bounded payloads and load-order-safe collection.
+- Render task/job contributions without linking companion extension packages or executing contributed actions.
+
 ## 0.1.0
 
 - Add a native Swift/Cocoa menu bar companion with live Pi states, assistant previews, background launches, exact inactive-session resume, logs and cooperative abort/shutdown controls.
