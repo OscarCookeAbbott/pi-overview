@@ -38,5 +38,6 @@ test("Pi loads one extension even when also explicitly requested, without starti
   assert.deepEqual([...result.extensions[0].commands.keys()], ["overview"]);
   assert.equal(existsSync(process.env.PI_OVERVIEW_DIR), false);
   assert.equal(process.listenerCount("exit"), listeners);
-  assert.equal(typeof (globals[PI_OVERVIEW_KEY] as OverviewService).publish, "function");
+  if (process.platform === "darwin") assert.equal(typeof (globals[PI_OVERVIEW_KEY] as OverviewService).publish, "function");
+  else assert.equal(globals[PI_OVERVIEW_KEY], previous);
 });

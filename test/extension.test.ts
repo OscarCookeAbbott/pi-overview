@@ -58,13 +58,29 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
 
 const macOnly = { skip: process.platform !== "darwin" };
 
+test("non-macOS overview is silent even for invalid settings and explicit commands", async (t) => {
+  for (const platform of ["linux", "win32"]) await t.test(platform, async (t) => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+      const h = harness(t, { unknown: true });
+      await h.emit("session_start");
+      for (const command of ["status", "start", "stop", "folder"]) await h.command(command);
+      assert.deepEqual(h.notices, []);
+      assert.equal(existsSync(h.root), false);
+      assert.equal(h.service, undefined);
+    } finally { Object.defineProperty(process, "platform", descriptor); }
+  });
+});
+
 test("factory starts no resources; disabled settings do not publish or launch", async (t) => {
   const h = harness(t, { enabled: false });
   assert.equal(existsSync(h.root), false);
   await h.emit("session_start");
   assert.equal(existsSync(h.root), false);
   await h.command("status");
-  assert.match(h.notices.at(-1)!, /disabled|macOS/);
+  if (process.platform === "darwin") assert.match(h.notices.at(-1)!, /disabled/);
+  else assert.deepEqual(h.notices, []);
 });
 
 test("parallel tools and intermediate turns remain busy until agent_settled; only assistant text is exposed", macOnly, async (t) => {
@@ -73,12 +89,14 @@ test("parallel tools and intermediate turns remain busy until agent_settled; onl
   assert.equal(h.read().status, "Ready");
   assert.equal(h.read().sessionName, "Example session");
   h.emit("agent_start");
+  assert.equal(h.read().status, "Working");
   h.emit("tool_execution_start", { toolCallId: "one", toolName: "read", args: { secret: "PRIVATE_ARGS" } });
   h.emit("tool_execution_start", { toolCallId: "two", toolName: "bash" });
   assert.equal(h.read().status, "Running 2 tools");
   h.emit("tool_execution_end", { toolCallId: "two" });
   assert.equal(h.read().status, "Running: read");
   h.emit("tool_execution_end", { toolCallId: "one" });
+  assert.equal(h.read().status, "Working");
   h.emit("message_end", { message: { role: "toolResult", content: [{ type: "text", text: "PRIVATE_TOOL" }] } });
   h.emit("message_end", { message: { role: "assistant", content: [{ type: "thinking", thinking: "PRIVATE_THINKING" }, { type: "text", text: "Visible\nanswer" }] } });
   h.emit("agent_end", { messages: [] });
@@ -135,7 +153,8 @@ test("overview contributions survive startup ordering, update/remove safely, and
   h.emit("agent_start");
   assert.equal(h.read().contributions?.[0].sections[0].items[0].title, "Example task");
   for (let i = 0; i < 3; i++) assert.equal(h.service.publish({ id: `extra${i}`, badge: "Badge", sections: [] }).success, true);
-  assert.equal(h.service.publish({ id: "overflow", badge: "Badge", sections: [] }).success, false);
+  assert.equal(h.service.publish({ id: "overflow", badge: "Badge", sections: [] }).success, true);
+  assert.equal(h.read().contributions?.length, 5);
   h.events.emit("overview:remove", "extra0");
   assert.equal(h.service.publish({ id: "overflow", badge: "Badge", sections: [] }).success, true);
   h.emit("session_shutdown");

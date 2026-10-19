@@ -13,11 +13,16 @@ if (process.platform !== "darwin") {
   const run = promisify(execFile);
   try {
     const model = join(root, "native", "Model.swift");
-    await run("/usr/bin/swiftc", ["-swift-version", "5", "-framework", "Cocoa", model, join(root, "native", "main.swift"), "-o", join(directory, "pi-overview")], { timeout: 120000 });
+    const menus = join(root, "native", "ContributionMenus.swift");
+    await run("/usr/bin/swiftc", ["-swift-version", "5", "-framework", "Cocoa", model, menus, join(root, "native", "main.swift"), "-o", join(directory, "pi-overview")], { timeout: 120000 });
     const tests = join(directory, "native-tests");
     await run("/usr/bin/swiftc", ["-swift-version", "5", model, join(root, "test", "NativeTests.swift"), "-o", tests], { timeout: 120000 });
     const result = await run(tests, [], { timeout: 10000 });
     process.stdout.write(result.stdout);
+    const menuTests = join(directory, "native-menu-tests");
+    await run("/usr/bin/swiftc", ["-swift-version", "5", "-framework", "Cocoa", model, menus, join(root, "test", "NativeMenuTests.swift"), "-o", menuTests], { timeout: 120000 });
+    const menuResult = await run(menuTests, [], { timeout: 10000 });
+    process.stdout.write(menuResult.stdout);
     console.log("Native Cocoa companion compiled successfully (GUI not launched by tests).");
   } catch (error) {
     console.error(error.stderr || error.message);

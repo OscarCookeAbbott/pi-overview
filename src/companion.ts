@@ -26,7 +26,7 @@ export async function writeLauncher(root: string, cwd: string): Promise<void> {
 export async function buildCompanion(root: string, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
   ensureDirectories(root);
-  const names = ["Model.swift", "main.swift"];
+  const names = ["Model.swift", "ContributionMenus.swift", "main.swift"];
   const sources = await Promise.all(names.map((name) => readFile(join(nativeDir, name))));
   signal?.throwIfAborted();
   const digest = createHash("sha256").update(process.arch);

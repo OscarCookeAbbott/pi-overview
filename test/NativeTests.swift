@@ -26,7 +26,7 @@ struct NativeTests {
         complete.busy = false
         complete.status = "Completed"
         expect(menubarTitle([]) == "π", "no separator without counts")
-        expect(menubarTitle([info, complete]) == "π · ◐ 1 ✓ 1", "running/completed counts have symbols and a centre dot")
+        expect(menubarTitle([info, complete]) == "π  ◐ 1 ✓ 1", "Pi and state counts are separated by exactly two spaces")
         expect(agentSymbol(complete) == "✓" && itemSymbol("failed") == "✕", "popup state symbols")
         expect(itemSymbol("running", phase: 1) == "◓", "running spinner advances")
         info.contributions = [
@@ -38,6 +38,13 @@ struct NativeTests {
         expect(badgeText(info) == "[3/6 tasks] [2 jobs]", "inline provider badges")
         try writeJSON(info, to: file)
         expect(InstanceInfo.read(file)?.contributions?.count == 2, "contribution snapshot round-trip")
+        var large = info
+        large.contributions = [OverviewContribution(id: "large", badge: "3000 tasks", sections: [OverviewSection(title: "Tasks", items:
+            (0..<3000).map { OverviewItem(title: "Task \($0)", state: "pending", detail: String(repeating: "x", count: 120)) }
+        )])]
+        try writeJSON(large, to: file)
+        expect(InstanceInfo.read(file)?.contributions?[0].sections[0].items.count == 3000, "large lists are not discarded by a snapshot-size cap")
+        try writeJSON(info, to: file)
         expect(!info.isLive(now: info.heartbeatAt + 20000), "stale heartbeat is not live")
         expect(!canResume(info, among: [info]), "never resume a live writer")
         try requestControl(info, action: "abort", root: root)

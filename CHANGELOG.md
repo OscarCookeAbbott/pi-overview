@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add recursive contributed items, complete multiline hover details/tooltips and Copy details, with lazily built native submenus.
+- Remove source/section/item/instance cutoffs and the snapshot-size ceiling that hid large lists; native menus scroll instead.
+- Separate Pi and counts with two spaces, and label generic activity Working rather than Thinking while keeping tool-specific states.
+- Stay silent and resource-free on non-macOS, including invalid settings and explicit commands.
+- Exercise real AppKit menu structure alongside SDK, lifecycle and native model/build tests.
+
 ## 0.2.2
 
 - Rename New Background Task to New agent and launch directly in the configured defaultDirectory, without a folder picker.

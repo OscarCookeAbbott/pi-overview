@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var actions: [MenuAction] = []
     var children: [String: (Process, FileHandle)] = [:]
     var phase = 0
+    let contributionMenus = ContributionMenus()
 
     init(root: URL) { self.root = root }
 
@@ -70,11 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
         actions.removeAll()
+        contributionMenus.reset()
         menu.addItem(entry("New agent…") { [weak self] in self?.newAgent() })
         menu.addItem(.separator())
         let instances = loadInstances(root: root)
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
-        for info in instances.prefix(30) {
+        for info in instances {
             let live = info.isLive()
             let symbol = agentSymbol(info, phase: phase)
             let badges = badgeText(info)
@@ -109,7 +111,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             heading.submenu = submenu
             menu.addItem(heading)
         }
-        if instances.count > 30 { menu.addItem(entry("Showing 30 of \(instances.count) recent instances", enabled: false)) }
         menu.addItem(.separator())
         menu.addItem(entry("Clear Finished Entries") { [weak self] in
             guard let self = self else { return }
@@ -123,24 +124,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func addContributions(_ info: InstanceInfo, to menu: NSMenu) {
-        let sections = (info.contributions ?? []).prefix(4).flatMap { $0.sections.prefix(3) }.filter { !$0.items.isEmpty }
+        let sections = (info.contributions ?? []).flatMap { $0.sections }.filter { !$0.items.isEmpty }
         guard !sections.isEmpty else { return }
         menu.addItem(.separator())
         for section in sections {
             let heading = entry(displayText(section.title, limit: 40))
-            let list = NSMenu()
-            list.autoenablesItems = false
-            for value in section.items.prefix(20) {
-                let row = entry("\(itemSymbol(value.state, phase: phase)) \(displayText(value.title, limit: 80))", enabled: !(value.detail ?? "").isEmpty)
-                if let detail = value.detail, !detail.isEmpty {
-                    let details = NSMenu()
-                    details.autoenablesItems = false
-                    details.addItem(entry(displayText(detail, limit: 120), enabled: false))
-                    row.submenu = details
-                }
-                list.addItem(row)
-            }
-            heading.submenu = list
+            heading.submenu = contributionMenus.makeItemsMenu(section.items, phase: phase)
             menu.addItem(heading)
         }
     }

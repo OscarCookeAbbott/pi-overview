@@ -10,6 +10,10 @@ export { PI_OVERVIEW_KEY } from "./contributions.ts";
 export type { OverviewContribution, OverviewItem, OverviewItemState, OverviewSection, OverviewService } from "./contributions.ts";
 
 export default function overviewExtension(pi: ExtensionAPI): void {
+  if (process.platform !== "darwin") {
+    pi.registerCommand("overview", { description: "Pi menu bar (macOS only)", async handler() {} });
+    return;
+  }
   const root = resolve(process.env.PI_OVERVIEW_DIR ?? join(getAgentDir(), "overview"));
   const globals = globalThis as Record<symbol, unknown>;
   const contributions = new Map<string, OverviewContribution>();
@@ -46,7 +50,6 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     publish(value) {
       try {
         const contribution = normalizeContribution(value);
-        if (!contributions.has(contribution.id) && contributions.size >= 4) return { success: false, error: "Overview supports at most four contribution sources per instance." };
         contributions.set(contribution.id, contribution);
         sync();
         return { success: true };
@@ -94,7 +97,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
   function toolStatus(): string {
     const first = tools.values().next().value;
     if (tools.size === 1 && first) return `Running: ${preview(first)}`;
-    return tools.size ? `Running ${tools.size} tools` : "Thinking";
+    return tools.size ? `Running ${tools.size} tools` : "Working";
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -105,7 +108,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     warned = false;
     failed = false;
     try { config = readConfig(pi.getSettings(), ctx.cwd); } catch (error) { config = { ...readConfig({}), enabled: false }; warn(error); }
-    if (!config.enabled || process.platform !== "darwin") return;
+    if (!config.enabled) return;
     try {
       publisher = new InstancePublisher(root, ctx.cwd, launchId);
       sync({}, ctx);
@@ -136,7 +139,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
   pi.on("agent_start", (_event, ctx) => {
     tools.clear();
     failed = false;
-    sync({ status: "Thinking", busy: true, lastOutput: "" }, ctx);
+    sync({ status: "Working", busy: true, lastOutput: "" }, ctx);
   });
   pi.on("tool_execution_start", (event, ctx) => {
     tools.set(event.toolCallId, event.toolName);
@@ -168,7 +171,6 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     description: "Pi menu bar: status, start, stop, or folder",
     async handler(args, ctx) {
       const action = args.trim() || "status";
-      if (process.platform !== "darwin") { ctx.ui.notify("Pi Overview's native companion requires macOS.", "warning"); return; }
       if (!publisher) { ctx.ui.notify("Pi Overview is disabled or could not initialise; check overview settings and session warnings.", "warning"); return; }
       try {
         if (action === "start") { await writeLauncher(root, config.defaultDirectory); await start(); ctx.ui.notify("Pi Overview launch requested. An existing companion is reused.", "info"); }

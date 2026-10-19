@@ -5,6 +5,7 @@ struct OverviewItem: Codable {
     let title: String
     let state: String?
     let detail: String?
+    var children: [OverviewItem]? = nil
 }
 struct OverviewSection: Codable {
     let title: String
@@ -46,8 +47,7 @@ struct InstanceInfo: Codable {
 
     static func read(_ url: URL) -> InstanceInfo? {
         guard url.pathExtension == "json",
-              let values = try? url.resourceValues(forKeys: [.fileSizeKey]), (values.fileSize ?? 262145) <= 262144,
-              let data = try? Data(contentsOf: url),
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
               let info = try? JSONDecoder().decode(InstanceInfo.self, from: data),
               info.version == 1, UUID(uuidString: info.id) != nil, UUID(uuidString: info.token) != nil,
               url.deletingPathExtension().lastPathComponent == info.id, info.pid >= 0,
@@ -126,10 +126,10 @@ func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
     if completed > 0 { counts.append("✓ \(completed)") }
     if failed > 0 { counts.append("✕ \(failed)") }
     if waiting > 0 { counts.append("○ \(waiting)") }
-    return "π · " + counts.joined(separator: " ")
+    return "π  " + counts.joined(separator: " ")
 }
 func badgeText(_ info: InstanceInfo) -> String {
-    (info.contributions ?? []).prefix(4).filter { !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
+    (info.contributions ?? []).filter { !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
 }
 
 func shellQuote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
