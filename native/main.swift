@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
         actions.removeAll()
-        menu.addItem(entry("New Background Task…") { [weak self] in self?.newTask() })
+        menu.addItem(entry("New agent…") { [weak self] in self?.newAgent() })
         menu.addItem(.separator())
         let instances = loadInstances(root: root)
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
@@ -183,20 +183,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try requestControl(info, action: action, root: root) } catch { showError(error) }
     }
 
-    func newTask() {
+    func newAgent() {
         do {
             let config = try launcher()
+            let directory = try config.newAgentDirectory()
             NSApp.activate(ignoringOtherApps: true)
-            let panel = NSOpenPanel()
-            panel.title = "Choose the project for this Pi task"
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.directoryURL = URL(fileURLWithPath: config.cwd)
-            guard panel.runModal() == .OK, let directory = panel.url else { return }
             let alert = NSAlert()
-            alert.messageText = "New Background Pi Task"
-            alert.informativeText = "Project: \(directory.path)\nRuns with your normal Pi credentials and saved trust settings. Output is logged privately."
+            alert.messageText = "New agent"
+            alert.informativeText = "Directory: \(directory.path)\nRuns with your normal Pi credentials and saved trust settings. Output is logged privately."
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 440, height: 100))
             let input = NSTextView(frame: scroll.bounds)
             input.isRichText = false
@@ -210,11 +204,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let prompt = input.string.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !prompt.isEmpty else { return }
             guard prompt.utf8.count <= 65536 else { throw OverviewError.message("Please keep prompts under 64 KiB.") }
-            try launch(config, cwd: directory.path, prompt: prompt)
+            try launch(config, prompt: prompt)
         } catch { showError(error) }
     }
 
-    func launch(_ config: Launcher, cwd: String, prompt: String) throws {
+    func launch(_ config: Launcher, prompt: String) throws {
+        let cwd = try config.newAgentDirectory().path
         let id = UUID().uuidString.lowercased()
         let session = root.appendingPathComponent("sessions/\(id).jsonl").path
         let log = root.appendingPathComponent("logs/\(id).log")

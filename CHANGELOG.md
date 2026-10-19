@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Rename New Background Task to New agent and launch directly in the configured defaultDirectory, without a folder picker.
+- Show the directory in the prompt dialog and reject unavailable/non-directory paths before launch.
+
 ## 0.2.1
 
 - Include the updated native renderer for state indicators, short output previews and contributed badges/menus alongside the publisher API.

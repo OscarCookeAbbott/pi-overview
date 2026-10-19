@@ -61,6 +61,15 @@ struct NativeTests {
         other.id = UUID().uuidString.lowercased()
         expect(!canResume(info, among: [info, other]), "another live writer blocks resume")
         let launcher = Launcher(node: "/node with spaces", cli: "/pi '$HOME'.js", extensionPath: "/extension.ts", cwd: root.path)
+        let newAgentDirectory = try launcher.newAgentDirectory()
+        expect(newAgentDirectory.path == root.path, "new agents use the configured directory directly")
+        for invalid in ["relative", root.appendingPathComponent("missing").path, session.path] {
+            let invalidLauncher = Launcher(node: launcher.node, cli: launcher.cli, extensionPath: launcher.extensionPath, cwd: invalid)
+            do {
+                _ = try invalidLauncher.newAgentDirectory()
+                expect(false, "missing, non-directory or relative launch directory accepted")
+            } catch {}
+        }
         let args = launcher.backgroundArguments(session: session.path)
         expect(args == [launcher.cli, "--print", "--session", session.path, "--extension", launcher.extensionPath], "structured launch arguments")
         expect(!args.contains(where: { $0.contains("--approve") || $0 == "-c" }), "no automatic trust or shell evaluation")

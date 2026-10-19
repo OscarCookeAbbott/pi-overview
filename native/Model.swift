@@ -70,6 +70,14 @@ struct Launcher: Decodable {
         }
     }
 
+    func newAgentDirectory() throws -> URL {
+        var isDirectory: ObjCBool = false
+        guard cwd.hasPrefix("/"), FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw OverviewError.message("The configured new-agent directory is unavailable: \(cwd). Update overview.defaultDirectory and reload Pi.")
+        }
+        return URL(fileURLWithPath: cwd, isDirectory: true)
+    }
+
     func backgroundArguments(session: String) -> [String] {
         // Prompt data goes to stdin, never through a shell, flags, or @file expansion.
         [cli, "--print", "--session", session, "--extension", extensionPath]
