@@ -39,6 +39,8 @@ struct InstanceInfo: Codable {
     var heartbeatAt: Double
     var contributions: [OverviewContribution]? = nil
 
+    var displayStatus: String { status == "Ready" ? "Idle" : status }
+
     var processAlive: Bool {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0 || errno == EPERM
@@ -101,23 +103,24 @@ func displayText(_ text: String, limit: Int = 160) -> String {
 }
 func itemSymbol(_ state: String?, phase: Int = 0) -> String {
     switch state {
-    case "running": return "🔄"
+    case "running": return "▶"
     case "complete": return "✓"
     case "failed": return "✕"
     case "waiting": return "…"
     case "cancelled": return "⊘"
-    case "pending": return "○"
+    case "pending": return "‖"
     case "unknown": return "?"
     default: return "•"
     }
 }
 func statusSymbolName(_ state: String?) -> String {
     switch state {
-    case "running": return "arrow.triangle.2.circlepath"
+    case "running": return "play.fill"
     case "complete": return "checkmark"
     case "failed": return "xmark"
     case "waiting": return "ellipsis"
     case "cancelled": return "nosign"
+    case "pending": return "pause"
     case "unknown": return "questionmark"
     default: return "circle"
     }
@@ -169,12 +172,12 @@ func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
     let running = live.filter { $0.busy }.count
     let completed = live.filter { !$0.busy && $0.status == "Completed" }.count
     let failed = live.filter { !$0.busy && $0.status.hasPrefix("Error") }.count
-    let waiting = live.count - running - completed - failed
+    let idle = live.count - running - completed - failed
     var counts: [String] = []
     if running > 0 { counts.append("\(itemSymbol("running", phase: phase)) \(running)") }
     if completed > 0 { counts.append("✓ \(completed)") }
     if failed > 0 { counts.append("✕ \(failed)") }
-    if waiting > 0 { counts.append("○ \(waiting)") }
+    if idle > 0 { counts.append("\(itemSymbol("pending")) \(idle)") }
     return "π  " + counts.joined(separator: " ")
 }
 func menuContributions(_ info: InstanceInfo) -> [OverviewContribution] {

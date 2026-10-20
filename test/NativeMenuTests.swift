@@ -60,7 +60,7 @@ struct NativeMenuTests {
     static func testStatusSymbols() throws {
         let renderer = ContributionMenus()
         for kind in ["task", "job"] {
-            for (state, symbol) in [("running", "arrow.triangle.2.circlepath"), ("complete", "checkmark")] {
+            for (state, symbol) in [("running", "play.fill"), ("complete", "checkmark"), ("pending", "pause")] {
                 let value = OverviewItem(title: "Status", state: state, detail: nil, kind: kind)
                 let menu = renderer.makeItemsMenu([value])
                 renderer.menuWillOpen(menu)
@@ -83,19 +83,23 @@ struct NativeMenuTests {
         complete.projectName = "Complete"
         complete.status = "Completed"
         complete.busy = false
-        let title = menubarAttributedTitle([running, complete])
-        expect(title.string == "π  \u{fffc} 1 \u{fffc} 1", "native count icons retain the exact Pi separator and counts")
+        var idle = complete
+        idle.id = UUID().uuidString
+        idle.status = "Idle"
+        let title = menubarAttributedTitle([running, complete, idle])
+        expect(title.string == "π  \u{fffc} 1 \u{fffc} 1 \u{fffc} 1", "native count icons retain the exact Pi separator and counts")
         var images: [NSImage] = []
         title.enumerateAttribute(.attachment, in: NSRange(location: 0, length: title.length)) { value, _, _ in
             if let image = (value as? NSTextAttachment)?.image { images.append(image) }
         }
-        expect(images.count == 2, "running and completed counts have native icons")
-        for (index, symbol) in ["arrow.triangle.2.circlepath", "checkmark"].enumerated() {
+        expect(images.count == 3, "running, completed and idle counts have native icons")
+        for (index, pair) in [("running", "play.fill"), ("complete", "checkmark"), ("pending", "pause")].enumerated() {
+            let (state, symbol) = pair
             let reference = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!
             reference.size = NSSize(width: NSFont.menuBarFont(ofSize: 0).pointSize, height: NSFont.menuBarFont(ofSize: 0).pointSize)
             expect(images[index].isTemplate && images[index].tiffRepresentation == reference.tiffRepresentation, "menubar uses the shared template \(symbol)")
             let row = NSMenuItem(title: "Agent", action: nil, keyEquivalent: "")
-            applyStatusIcon(row, state: index == 0 ? "running" : "complete")
+            applyStatusIcon(row, state: state)
             reference.size = NSSize(width: 14, height: 14)
             expect(row.image?.tiffRepresentation == reference.tiffRepresentation, "agent row uses the shared \(symbol)")
         }

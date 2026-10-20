@@ -89,7 +89,7 @@ export class InstancePublisher {
     this.commandPath = join(root, "commands", `${id}.json`);
     this.snapshot = {
       version: 1, id, token: randomUUID(), pid: process.pid, cwd: resolve(cwd), projectName: basename(resolve(cwd)) || cwd,
-      status: "Ready", busy: false, closed: false, lastOutput: "", updatedAt: Date.now(), heartbeatAt: Date.now(),
+      status: "Idle", busy: false, closed: false, lastOutput: "", updatedAt: Date.now(), heartbeatAt: Date.now(),
       ...(managed ? { logFile: join(root, "logs", `${id}.log`) } : {}),
     };
     this.update({});

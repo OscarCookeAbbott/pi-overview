@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.attributedTitle = menubarAttributedTitle(instances, phase: phase)
             button.setAccessibilityLabel(title)
         }
-        item.button?.toolTip = "Pi Overview · \(live.filter { $0.busy }.count) busy · \(live.filter { !$0.busy }.count) waiting"
+        item.button?.toolTip = "Pi Overview · \(live.filter { $0.busy }.count) busy · \(live.filter { !$0.busy }.count) idle"
         try? writeJSON(["pid": Double(ProcessInfo.processInfo.processIdentifier), "heartbeatAt": nowMillis()], to: root.appendingPathComponent("daemon.json"))
         let command = root.appendingPathComponent("daemon-command.json")
         if let data = try? Data(contentsOf: command) {
@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let state = agentState(info)
             let badges = badgeText(info)
             let name = displayText(info.sessionName ?? info.projectName, limit: 60)
-            let status = displayText(live || info.closed ? info.status : "Disconnected", limit: 50)
+            let status = displayText(live || info.closed ? info.displayStatus : "Disconnected", limit: 50)
             let heading = entry("\(name) · \(status)" + (badges.isEmpty ? "" : " " + badges))
             applyStatusIcon(heading, state: state)
             let submenu = NSMenu()

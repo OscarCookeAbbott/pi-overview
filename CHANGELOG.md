@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- Use an unenclosed native play triangle for running and plain pause bars for idle/pending across menubar, agent, task and job indicators.
+- Call the ready session state Idle, including legacy Ready records.
+- Clarify that Completed means the latest agent run settled, not that the session exited or every task/background job finished.
+
 ## 0.5.1
 
 - Stretch the inline agent composer with the menu width, keeping its editor, directory readout and action buttons aligned.

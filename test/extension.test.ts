@@ -86,7 +86,7 @@ test("factory starts no resources; disabled settings do not publish or launch", 
 test("parallel tools and intermediate turns remain busy until agent_settled; only assistant text is exposed", macOnly, async (t) => {
   const h = harness(t);
   await h.emit("session_start");
-  assert.equal(h.read().status, "Ready");
+  assert.equal(h.read().status, "Idle");
   assert.equal(h.read().sessionName, "Example session");
   assert.equal(h.read().sessionId, "stable-session-id");
   h.emit("agent_start");

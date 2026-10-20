@@ -82,9 +82,17 @@ struct NativeTests {
         complete.busy = false
         complete.status = "Completed"
         expect(menubarTitle([]) == "π", "no separator without counts")
-        expect(menubarTitle([info, complete]) == "π  🔄 1 ✓ 1", "Pi and state counts are separated by exactly two spaces")
+        expect(menubarTitle([info, complete]) == "π  ▶ 1 ✓ 1", "Pi and state counts are separated by exactly two spaces")
         expect(agentSymbol(complete) == "✓" && itemSymbol("failed") == "✕", "popup state symbols")
-        expect(itemSymbol("running", phase: 1) == "🔄", "running uses the two-arrow symbol")
+        expect(itemSymbol("running", phase: 1) == "▶", "running uses an unenclosed play triangle")
+        var idle = complete
+        idle.id = UUID().uuidString
+        idle.status = "Idle"
+        expect(agentState(idle) == "pending" && agentSymbol(idle) == "‖", "idle sessions use plain pause bars, not a completion checkmark")
+        expect(menubarTitle([info, complete, idle]) == "π  ▶ 1 ✓ 1 ‖ 1", "idle count uses the shared pause fallback")
+        idle.status = "Ready"
+        expect(idle.displayStatus == "Idle" && agentSymbol(idle) == "‖", "legacy Ready records are presented as Idle")
+        expect(complete.displayStatus == "Completed", "completion labels remain distinct from idle")
         info.contributions = [
             OverviewContribution(id: "tasks", badge: "3/6 tasks", sections: [OverviewSection(title: "Tasks", items: [
                 OverviewItem(title: "[ab] Build", state: "running", detail: "Run tests")
