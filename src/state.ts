@@ -58,6 +58,7 @@ export interface InstanceSnapshot {
   pid: number;
   cwd: string;
   projectName: string;
+  sessionId?: string;
   sessionFile?: string;
   sessionName?: string;
   logFile?: string;
@@ -70,7 +71,7 @@ export interface InstanceSnapshot {
   heartbeatAt: number;
 }
 
-type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "contributions">>;
+type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionId" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "contributions">>;
 export type ControlAction = "abort" | "shutdown";
 
 export class InstancePublisher {

@@ -22,7 +22,7 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
   const ctx = {
     mode: "tui", cwd: dir, isIdle: () => idle,
     abort: () => { aborts++; }, shutdown: () => { shutdowns++; },
-    sessionManager: { getSessionFile: () => join(dir, "exact.jsonl"), getSessionName: () => "Example session" },
+    sessionManager: { getSessionId: () => "stable-session-id", getSessionFile: () => join(dir, "exact.jsonl"), getSessionName: () => "Example session" },
     ui: { notify: (text: string) => notices.push(text) },
   } as unknown as ExtensionContext;
   const exitListeners = process.listenerCount("exit");
@@ -88,6 +88,7 @@ test("parallel tools and intermediate turns remain busy until agent_settled; onl
   await h.emit("session_start");
   assert.equal(h.read().status, "Ready");
   assert.equal(h.read().sessionName, "Example session");
+  assert.equal(h.read().sessionId, "stable-session-id");
   h.emit("agent_start");
   assert.equal(h.read().status, "Working");
   h.emit("tool_execution_start", { toolCallId: "one", toolName: "read", args: { secret: "PRIVATE_ARGS" } });

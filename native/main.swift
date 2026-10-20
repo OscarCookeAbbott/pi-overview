@@ -61,9 +61,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             children.removeValue(forKey: id)
         }
         let instances = loadInstances(root: root)
-        let live = instances.filter { $0.isLive() }
+        let live = deduplicateSessions(instances).filter { $0.isLive() }
         phase = (phase + 1) % 4
-        item.button?.title = menubarTitle(instances, phase: phase)
+        if let button = item.button {
+            let title = menubarTitle(instances, phase: phase)
+            button.title = title
+            button.attributedTitle = menubarAttributedTitle(instances, phase: phase)
+            button.setAccessibilityLabel(title)
+        }
         item.button?.toolTip = "Pi Overview · \(live.filter { $0.busy }.count) busy · \(live.filter { !$0.busy }.count) waiting"
         try? writeJSON(["pid": Double(ProcessInfo.processInfo.processIdentifier), "heartbeatAt": nowMillis()], to: root.appendingPathComponent("daemon.json"))
         let command = root.appendingPathComponent("daemon-command.json")
@@ -85,18 +90,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         composerItem.view = agentComposer
         menu.addItem(composerItem)
         menu.addItem(.separator())
-        let instances = loadInstances(root: root)
+        let registrations = loadInstances(root: root)
+        let instances = deduplicateSessions(registrations)
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
         for info in instances {
             let live = info.isLive()
-            let symbol = agentSymbol(info, phase: phase)
+            let state = agentState(info)
             let badges = badgeText(info)
             let name = displayText(info.sessionName ?? info.projectName, limit: 60)
             let status = displayText(live || info.closed ? info.status : "Disconnected", limit: 50)
-            let heading = entry("\(symbol) \(name) · \(status)" + (badges.isEmpty ? "" : " " + badges))
+            let heading = entry("\(name) · \(status)" + (badges.isEmpty ? "" : " " + badges))
+            applyStatusIcon(heading, state: state)
             let submenu = NSMenu()
             submenu.autoenablesItems = false
-            submenu.addItem(entry("\(symbol) \(status)", enabled: false))
+            let statusRow = entry(status, enabled: false)
+            applyStatusIcon(statusRow, state: state)
+            submenu.addItem(statusRow)
             submenu.addItem(entry(displayText(info.cwd, limit: 180), enabled: false))
             submenu.addItem(entry("PID \(info.pid) · \(info.id.prefix(8))", enabled: false))
             submenu.addItem(entry(info.lastOutput.isEmpty ? "No assistant output yet" : displayText(info.lastOutput, limit: 60), enabled: false))
@@ -109,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             addContributions(info, to: submenu)
             submenu.addItem(.separator())
             submenu.addItem(entry("Open Project in Terminal") { [weak self] in self?.openTerminal(info, resume: false) })
-            submenu.addItem(entry("Resume This Session in Terminal", enabled: canResume(info, among: instances)) { [weak self] in self?.openTerminal(info, resume: true) })
+            submenu.addItem(entry("Resume This Session in Terminal", enabled: canResume(info, among: registrations)) { [weak self] in self?.openTerminal(info, resume: true) })
             if let log = info.logFile, FileManager.default.fileExists(atPath: log) {
                 submenu.addItem(entry("Open Run Log") { NSWorkspace.shared.open(URL(fileURLWithPath: log)) })
             }

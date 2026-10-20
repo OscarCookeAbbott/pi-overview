@@ -40,8 +40,8 @@ final class ContributionMenus: NSObject, NSMenuDelegate {
         switch value.kind {
         case "note": symbol = value.state == "cancelled" ? "note.text.badge.minus" : "note.text"
         case "group": symbol = value.title == "Notes" ? "text.bubble" : "list.bullet.indent"
-        case "job": symbol = "terminal"
-        default: symbol = value.state == "complete" ? "checkmark.circle" : value.state == "running" ? "arrow.triangle.2.circlepath" : "circle"
+        case "job" where value.state == nil || value.state == "unknown": symbol = "terminal"
+        default: symbol = statusSymbolName(value.state)
         }
         row.image = NSImage(systemSymbolName: symbol, accessibilityDescription: value.kind ?? value.state)
         if row.image == nil { row.title = "\(itemSymbol(value.state, phase: phase)) \(title)" }

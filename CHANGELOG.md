@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Unify native running/success symbols across menubar counts and agent/task/job rows: the two-arrow cycle and a plain checkmark, with native template images in the status title.
+- Deduplicate menu rows and state counts by Pi session ID across reload registrations, preferring live/current-process records and then the newest finished snapshot.
+- Publish stable session IDs and recover IDs from bounded legacy session-header reads; retain raw registrations for safe controls, resume exclusion and cleanup.
+
 ## 0.4.0
 
 - Add native typed task/note/job icons, ownership groups and selectable scrollable content cards instead of plain disabled-text menus.

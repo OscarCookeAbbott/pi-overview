@@ -27,6 +27,7 @@ struct InstanceInfo: Codable {
     var pid: Int32
     var cwd: String
     var projectName: String
+    var sessionId: String?
     var sessionFile: String?
     var sessionName: String?
     var logFile: String?
@@ -100,25 +101,70 @@ func displayText(_ text: String, limit: Int = 160) -> String {
 }
 func itemSymbol(_ state: String?, phase: Int = 0) -> String {
     switch state {
-    case "running": return ["◐", "◓", "◑", "◒"][phase % 4]
+    case "running": return "🔄"
     case "complete": return "✓"
     case "failed": return "✕"
     case "waiting": return "…"
     case "cancelled": return "⊘"
     case "pending": return "○"
+    case "unknown": return "?"
     default: return "•"
     }
 }
-func agentSymbol(_ info: InstanceInfo, phase: Int = 0) -> String {
-    if !info.isLive() && !info.closed { return "?" }
-    if info.busy { return itemSymbol("running", phase: phase) }
-    if info.status.hasPrefix("Error") || info.status == "Launch failed" { return "✕" }
-    if info.status == "Completed" { return "✓" }
-    if info.status == "Aborted" || info.status == "Closed" || info.status == "Exited" { return "⊘" }
-    return "○"
+func statusSymbolName(_ state: String?) -> String {
+    switch state {
+    case "running": return "arrow.triangle.2.circlepath"
+    case "complete": return "checkmark"
+    case "failed": return "xmark"
+    case "waiting": return "ellipsis"
+    case "cancelled": return "nosign"
+    case "unknown": return "questionmark"
+    default: return "circle"
+    }
 }
+func agentState(_ info: InstanceInfo) -> String {
+    if !info.isLive() && !info.closed { return "unknown" }
+    if info.busy { return "running" }
+    if info.status.hasPrefix("Error") || info.status == "Launch failed" { return "failed" }
+    if info.status == "Completed" { return "complete" }
+    if info.status == "Aborted" || info.status == "Closed" || info.status == "Exited" { return "cancelled" }
+    return "pending"
+}
+func agentSymbol(_ info: InstanceInfo, phase: Int = 0) -> String {
+    itemSymbol(agentState(info), phase: phase)
+}
+func sessionIdentity(_ info: InstanceInfo) -> String? {
+    if let id = info.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+        return UUID(uuidString: id)?.uuidString.lowercased() ?? id
+    }
+    guard let path = info.sessionFile, let file = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+    defer { try? file.close() }
+    guard let data = try? file.read(upToCount: 16384),
+          let header = (try? JSONSerialization.jsonObject(with: Data(data.prefix { $0 != 10 }))) as? [String: Any],
+          header["type"] as? String == "session",
+          let id = (header["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+    return UUID(uuidString: id)?.uuidString.lowercased() ?? id
+}
+
+func deduplicateSessions(_ instances: [InstanceInfo], now: Double = nowMillis()) -> [InstanceInfo] {
+    let ranked = instances.sorted {
+        let leftLive = $0.isLive(now: now), rightLive = $1.isLive(now: now)
+        if leftLive != rightLive { return leftLive }
+        let leftProcess = $0.processAlive, rightProcess = $1.processAlive
+        if leftProcess != rightProcess { return leftProcess }
+        if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+        if $0.heartbeatAt != $1.heartbeatAt { return $0.heartbeatAt > $1.heartbeatAt }
+        return $0.id < $1.id
+    }
+    var seen = Set<String>()
+    return ranked.filter { info in
+        let key = sessionIdentity(info).map { "session:\($0)" } ?? "instance:\(info.id)"
+        return seen.insert(key).inserted
+    }
+}
+
 func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
-    let live = instances.filter { $0.isLive() }
+    let live = deduplicateSessions(instances).filter { $0.isLive() }
     guard !live.isEmpty else { return "π" }
     let running = live.filter { $0.busy }.count
     let completed = live.filter { !$0.busy && $0.status == "Completed" }.count

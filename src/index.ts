@@ -42,7 +42,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     if (!publisher || !ctx) return;
     context = ctx;
     try {
-      publisher.update({ cwd: ctx.cwd, projectName: basename(ctx.cwd) || ctx.cwd, sessionFile: ctx.sessionManager.getSessionFile(), sessionName: ctx.sessionManager.getSessionName(), contributions: [...contributions.values()], ...patch });
+      publisher.update({ cwd: ctx.cwd, projectName: basename(ctx.cwd) || ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), sessionFile: ctx.sessionManager.getSessionFile(), sessionName: ctx.sessionManager.getSessionName(), contributions: [...contributions.values()], ...patch });
     } catch (error) { warn(error); }
   }
 

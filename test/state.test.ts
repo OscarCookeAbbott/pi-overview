@@ -25,7 +25,7 @@ test("snapshots are private/atomic, keep output across heartbeats and preserve f
   const publisher = setup(t);
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
-  publisher.update({ status: "Completed", lastOutput: "Answer", sessionFile: "/tmp/exact.jsonl" });
+  publisher.update({ status: "Completed", lastOutput: "Answer", sessionId: "stable-session-id", sessionFile: "/tmp/exact.jsonl" });
   const changedAt = publisher.snapshot.updatedAt;
   now += 2000;
   publisher.heartbeat();
@@ -33,6 +33,7 @@ test("snapshots are private/atomic, keep output across heartbeats and preserve f
   assert.equal(snapshot.updatedAt, changedAt);
   assert.equal(snapshot.heartbeatAt, now);
   assert.equal(snapshot.lastOutput, "Answer");
+  assert.equal(snapshot.sessionId, "stable-session-id");
   assert.equal(snapshot.sessionFile, "/tmp/exact.jsonl");
   assert.equal(snapshot.projectName, "Project 'quoted' 🥧");
   assert.equal(statSync(publisher.root).mode & 0o777, 0o700);
