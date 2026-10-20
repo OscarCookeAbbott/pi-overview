@@ -16,6 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var children: [String: (Process, FileHandle)] = [:]
     var phase = 0
     let contributionMenus = ContributionMenus()
+    lazy var agentComposer = AgentComposer { [weak self] prompt, directory in
+        guard let self = self else { throw OverviewError.message("Overview is no longer available.") }
+        let configured = try self.launcher()
+        let config = Launcher(node: configured.node, cli: configured.cli, extensionPath: configured.extensionPath, cwd: directory)
+        try self.launch(config, prompt: prompt)
+        self.item.menu?.cancelTracking()
+    }
 
     init(root: URL) { self.root = root }
 
@@ -72,7 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         actions.removeAll()
         contributionMenus.reset()
-        menu.addItem(entry("New agent…") { [weak self] in self?.newAgent() })
+        do { agentComposer.configure(directory: try launcher().cwd) }
+        catch { agentComposer.configure(directory: nil, error: error.localizedDescription) }
+        let composerItem = NSMenuItem(title: "New agent", action: nil, keyEquivalent: "")
+        composerItem.view = agentComposer
+        menu.addItem(composerItem)
         menu.addItem(.separator())
         let instances = loadInstances(root: root)
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
@@ -124,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func addContributions(_ info: InstanceInfo, to menu: NSMenu) {
-        let sections = (info.contributions ?? []).flatMap { $0.sections }.filter { !$0.items.isEmpty }
+        let sections = menuContributions(info).flatMap { $0.sections }.filter { !$0.items.isEmpty }
         guard !sections.isEmpty else { return }
         menu.addItem(.separator())
         for section in sections {
@@ -170,31 +181,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         do { try requestControl(info, action: action, root: root) } catch { showError(error) }
-    }
-
-    func newAgent() {
-        do {
-            let config = try launcher()
-            let directory = try config.newAgentDirectory()
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.messageText = "New agent"
-            alert.informativeText = "Directory: \(directory.path)\nRuns with your normal Pi credentials and saved trust settings. Output is logged privately."
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 440, height: 100))
-            let input = NSTextView(frame: scroll.bounds)
-            input.isRichText = false
-            scroll.documentView = input
-            scroll.hasVerticalScroller = true
-            alert.accessoryView = scroll
-            alert.addButton(withTitle: "Run")
-            alert.addButton(withTitle: "Cancel")
-            alert.window.initialFirstResponder = input
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            let prompt = input.string.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !prompt.isEmpty else { return }
-            guard prompt.utf8.count <= 65536 else { throw OverviewError.message("Please keep prompts under 64 KiB.") }
-            try launch(config, prompt: prompt)
-        } catch { showError(error) }
     }
 
     func launch(_ config: Launcher, prompt: String) throws {

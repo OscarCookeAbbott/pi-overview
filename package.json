@@ -1,6 +1,6 @@
 {
   "name": "@oscar-robin/pi-overview",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A native macOS menu bar overview and manager for Pi instances.",
   "type": "module",
   "license": "MIT",

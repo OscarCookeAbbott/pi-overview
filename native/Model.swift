@@ -6,6 +6,9 @@ struct OverviewItem: Codable {
     let state: String?
     let detail: String?
     var children: [OverviewItem]? = nil
+    var kind: String? = nil
+    var subtitle: String? = nil
+    var body: String? = nil
 }
 struct OverviewSection: Codable {
     let title: String
@@ -128,8 +131,19 @@ func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
     if waiting > 0 { counts.append("○ \(waiting)") }
     return "π  " + counts.joined(separator: " ")
 }
+func menuContributions(_ info: InstanceInfo) -> [OverviewContribution] {
+    (info.contributions ?? []).compactMap { contribution in
+        guard contribution.id == "jobs" else { return contribution }
+        guard info.isLive() else { return nil }
+        let sections = contribution.sections.compactMap { section -> OverviewSection? in
+            let items = section.items.filter { $0.state == "running" }
+            return items.isEmpty ? nil : OverviewSection(title: "Running jobs", items: items)
+        }
+        return sections.isEmpty ? nil : OverviewContribution(id: "jobs", badge: "", sections: sections)
+    }
+}
 func badgeText(_ info: InstanceInfo) -> String {
-    (info.contributions ?? []).filter { !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
+    (info.contributions ?? []).filter { $0.id != "jobs" && !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
 }
 
 func shellQuote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }

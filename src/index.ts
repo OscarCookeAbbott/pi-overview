@@ -7,7 +7,7 @@ import { atomicJSON, InstancePublisher, preview, readConfig } from "./state.ts";
 import { normalizeContribution, PI_OVERVIEW_KEY, type OverviewContribution, type OverviewService } from "./contributions.ts";
 
 export { PI_OVERVIEW_KEY } from "./contributions.ts";
-export type { OverviewContribution, OverviewItem, OverviewItemState, OverviewSection, OverviewService } from "./contributions.ts";
+export type { OverviewContribution, OverviewItem, OverviewItemKind, OverviewItemState, OverviewSection, OverviewService } from "./contributions.ts";
 
 export default function overviewExtension(pi: ExtensionAPI): void {
   if (process.platform !== "darwin") {

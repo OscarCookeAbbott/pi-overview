@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Add native typed task/note/job icons, ownership groups and selectable scrollable content cards instead of plain disabled-text menus.
+- Embed New agent directly in the menu with a multiline prompt, Start/Command-Return, draft retention and inline errors.
+- Add a directory readout and optional folder chooser above the input; overrides apply only to the current draft/launch and never change settings.
+- Suppress job badges and finished/stale job rows even from legacy publisher payloads.
+- Test actual native cards, folder-button actions, keyboard/focus, per-draft directory behaviour and composer validation without launching a model.
+
 ## 0.3.0
 
 - Add recursive contributed items, complete multiline hover details/tooltips and Copy details, with lazily built native submenus.

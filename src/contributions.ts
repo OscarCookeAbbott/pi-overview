@@ -2,7 +2,8 @@ import { stripVTControlCharacters } from "node:util";
 
 export const PI_OVERVIEW_KEY = Symbol.for("pi.overview");
 export type OverviewItemState = "running" | "complete" | "failed" | "waiting" | "pending" | "cancelled" | "unknown";
-export interface OverviewItem { title: string; state?: OverviewItemState; detail?: string; children?: OverviewItem[] }
+export type OverviewItemKind = "task" | "note" | "job" | "group";
+export interface OverviewItem { title: string; state?: OverviewItemState; kind?: OverviewItemKind; subtitle?: string; body?: string; detail?: string; children?: OverviewItem[] }
 export interface OverviewSection { title: string; items: OverviewItem[] }
 export interface OverviewContribution { id: string; badge: string; sections: OverviewSection[] }
 export interface OverviewService {
@@ -29,11 +30,15 @@ function normalizeItem(value: unknown, ancestors: Set<object>): OverviewItem {
   if (ancestors.has(item)) throw new Error("Overview items must not contain cycles.");
   const state = item.state ?? "pending";
   if (!["running", "complete", "failed", "waiting", "pending", "cancelled", "unknown"].includes(state as string)) throw new Error("Invalid overview item state.");
+  if (item.kind !== undefined && !["task", "note", "job", "group"].includes(item.kind as string)) throw new Error("Invalid overview item kind.");
   if (item.children !== undefined && !Array.isArray(item.children)) throw new Error("Overview children must be an array.");
   ancestors.add(item);
   try {
     return {
       title: text(item.title, 80), state: state as OverviewItemState,
+      ...(item.kind === undefined ? {} : { kind: item.kind as OverviewItemKind }),
+      ...(item.subtitle === undefined ? {} : { subtitle: text(item.subtitle, 160, true) }),
+      ...(item.body === undefined ? {} : { body: detail(item.body) }),
       ...(item.detail === undefined ? {} : { detail: detail(item.detail) }),
       ...(item.children === undefined ? {} : { children: (item.children as unknown[]).map((child) => normalizeItem(child, ancestors)) }),
     };

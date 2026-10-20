@@ -35,7 +35,14 @@ struct NativeTests {
             ])]),
             OverviewContribution(id: "jobs", badge: "2 jobs", sections: [])
         ]
-        expect(badgeText(info) == "[3/6 tasks] [2 jobs]", "inline provider badges")
+        expect(badgeText(info) == "[3/6 tasks]", "job counts are not shown inline")
+        var jobsInfo = info
+        jobsInfo.contributions = [OverviewContribution(id: "jobs", badge: "2 jobs", sections: [OverviewSection(title: "Jobs", items: [
+            OverviewItem(title: "Running", state: "running", detail: nil), OverviewItem(title: "Old", state: "complete", detail: nil)
+        ])])]
+        expect(menuContributions(jobsInfo)[0].sections[0].items.count == 1, "legacy menu payloads hide finished jobs")
+        jobsInfo.closed = true
+        expect(menuContributions(jobsInfo).isEmpty, "closed agents cannot show stale running jobs")
         try writeJSON(info, to: file)
         expect(InstanceInfo.read(file)?.contributions?.count == 2, "contribution snapshot round-trip")
         var large = info

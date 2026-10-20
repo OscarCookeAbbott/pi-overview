@@ -4,7 +4,10 @@ import { normalizeContribution } from "../src/contributions.ts";
 
 test("recursive items retain every note and complete multiline detail without serializing actions", () => {
   const children = Array.from({ length: 50 }, (_, i) => ({ title: `Note ${i}`, detail: `Note text\n${"detail ".repeat(50)}`, onClick() {} }));
-  const value = normalizeContribution({ id: "tasks", badge: "1/2 tasks", sections: [{ title: "Tasks", items: [{ title: "Parent", children }] }] });
+  const value = normalizeContribution({ id: "tasks", badge: "1/2 tasks", sections: [{ title: "Tasks", items: [{ title: "Parent", kind: "task", subtitle: "Active · 50 notes", body: "Scope\nComplete description", children }] }] });
+  assert.equal(value.sections[0].items[0].kind, "task");
+  assert.equal(value.sections[0].items[0].subtitle, "Active · 50 notes");
+  assert.equal(value.sections[0].items[0].body, "Scope\nComplete description");
   const notes = value.sections[0].items[0].children!;
   assert.equal(notes.length, 50);
   assert.equal(notes[49].detail, children[49].detail.trim());
@@ -19,4 +22,5 @@ test("cyclic trees and malformed children are rejected instead of dropping desce
   const contribution = (value: unknown) => ({ id: "tasks", badge: "", sections: [{ title: "Tasks", items: [value] }] });
   assert.throws(() => normalizeContribution(contribution(item)), /cycles/);
   assert.throws(() => normalizeContribution(contribution({ title: "Parent", children: {} })), /array/);
+  assert.throws(() => normalizeContribution(contribution({ title: "Parent", kind: "executable" })), /kind/);
 });
