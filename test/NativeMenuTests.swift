@@ -52,6 +52,7 @@ struct NativeMenuTests {
         expect(note.image != nil, "typed notes have a native icon")
         try testStatusSymbols()
         testMenubarSymbols()
+        testComposerLayout()
         try testComposer()
         print("Native menu tests passed: structured cards, owned notes, scrolling lists and inline composer controls.")
     }
@@ -98,6 +99,39 @@ struct NativeMenuTests {
             reference.size = NSSize(width: 14, height: 14)
             expect(row.image?.tiffRepresentation == reference.tiffRepresentation, "agent row uses the shared \(symbol)")
         }
+    }
+
+    static func testComposerLayout() {
+        let composer = AgentComposer { _, _ in }
+        composer.configure(directory: FileManager.default.temporaryDirectory.path)
+        guard let scroll = composer.editor.enclosingScrollView,
+              let hint = composer.subviews.compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue.hasPrefix("⌘") }) else {
+            expect(false, "composer has a scrollable editor and keyboard hint"); return
+        }
+        for width: CGFloat in [560, 360, 720] {
+            composer.setFrameSize(NSSize(width: width, height: composer.frame.height))
+            composer.layoutSubtreeIfNeeded()
+            scroll.tile()
+            expect(abs(scroll.frame.maxX - (width - scroll.frame.minX)) < 1, "prompt must stretch with the menu width, retaining equal side insets")
+            expect(abs(composer.editor.frame.width - scroll.contentSize.width) < 1, "editor fills the scroll viewport and wraps at its current width")
+            expect(composer.directoryButton.frame.maxX == scroll.frame.maxX && composer.startButton.frame.maxX == scroll.frame.maxX, "folder and Start buttons remain aligned to the right edge")
+            expect(composer.directoryLabel.frame.minX == scroll.frame.minX && composer.directoryLabel.frame.maxX < composer.directoryButton.frame.minX,
+                   "directory readout stretches without covering its folder button")
+            expect(hint.frame.maxX < composer.startButton.frame.minX, "keyboard hint does not overlap Start at any menu width")
+            expect((48...72).contains(scroll.frame.height) && composer.frame.height <= 180, "composer uses a compact multiline prompt rather than a tall fixed panel")
+            expect(composer.bounds.height - composer.startButton.frame.maxY <= 12, "footer has normal padding, not a reserved blank error row")
+            expect(composer.errorLabel.isHidden && !hint.isHidden, "healthy drafts show the hint without an empty error region")
+        }
+        composer.prompt = String(repeating: "A longer multiline draft\n", count: 20)
+        composer.editor.sizeToFit()
+        expect(composer.editor.frame.height > scroll.contentSize.height && scroll.hasVerticalScroller, "long drafts still scroll inside the shorter input")
+        let height = composer.frame.height
+        composer.configure(directory: nil, error: "Configuration missing")
+        expect(!composer.errorLabel.isHidden && hint.isHidden, "inline errors replace the hint rather than adding a blank row")
+        expect(composer.frame.height == height && composer.errorLabel.frame.maxX < composer.startButton.frame.minX, "errors fit beside Start without resizing the tracking menu")
+        expect(composer.subviews.filter { !$0.isHidden }.allSatisfy { composer.bounds.contains($0.frame) }, "all visible controls fit inside the compact composer")
+        composer.configure(directory: FileManager.default.temporaryDirectory.path)
+        expect(composer.errorLabel.isHidden && !hint.isHidden, "clearing the error restores the keyboard hint")
     }
 
     static func testComposer() throws {

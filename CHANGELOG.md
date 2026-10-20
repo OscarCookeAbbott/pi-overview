@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Stretch the inline agent composer with the menu width, keeping its editor, directory readout and action buttons aligned.
+- Use a shorter multiline input with a subtle rounded border; show inline errors in the footer instead of reserving an empty row.
+
 ## 0.5.0
 
 - Unify native running/success symbols across menubar counts and agent/task/job rows: the two-arrow cycle and a plain checkmark, with native template images in the status title.
