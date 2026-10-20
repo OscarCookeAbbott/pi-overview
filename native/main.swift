@@ -10,6 +10,8 @@ final class MenuAction: NSObject {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let root: URL
+    let instanceId = UUID().uuidString
+    let buildIdentity = CompanionBuild.current
     var item: NSStatusItem!
     var timer: Timer?
     var actions: [MenuAction] = []
@@ -70,13 +72,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.setAccessibilityLabel(title)
         }
         item.button?.toolTip = "Pi Overview · \(live.filter { $0.busy }.count) busy · \(live.filter { !$0.busy }.count) idle"
-        try? writeJSON(["pid": Double(ProcessInfo.processInfo.processIdentifier), "heartbeatAt": nowMillis()], to: root.appendingPathComponent("daemon.json"))
+        try? writeJSON(CompanionInfo(pid: getpid(), instanceId: instanceId, version: buildIdentity.version, build: buildIdentity.build, heartbeatAt: nowMillis()),
+                       to: root.appendingPathComponent("daemon.json"))
         let command = root.appendingPathComponent("daemon-command.json")
-        if let data = try? Data(contentsOf: command) {
-            try? FileManager.default.removeItem(at: command)
-            if let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               value["action"] as? String == "quit", let time = value["createdAt"] as? Double,
-               nowMillis() >= time, nowMillis() - time < 10000 { NSApp.terminate(nil) }
+        let claimed = root.appendingPathComponent("daemon-command-\(instanceId).processing")
+        if (try? FileManager.default.moveItem(at: command, to: claimed)) != nil {
+            defer { try? FileManager.default.removeItem(at: claimed) }
+            if let data = try? Data(contentsOf: claimed), companionShouldQuit(data, pid: getpid(), instanceId: instanceId) { NSApp.terminate(nil) }
         }
     }
 
@@ -257,6 +259,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--version" {
+    do { print(String(decoding: try JSONEncoder().encode(CompanionBuild.current), as: UTF8.self)) }
+    catch { fputs("Cannot encode overview version\n", stderr); exit(1) }
+    exit(0)
+}
 umask(0o077)
 guard CommandLine.arguments.count == 2, CommandLine.arguments[1].hasPrefix("/") else {
     fputs("Usage: pi-overview <absolute-state-directory>\n", stderr)
@@ -266,7 +273,7 @@ let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 do {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 } catch { fputs("Cannot create overview directory: \(error)\n", stderr); exit(1) }
-let lock = open(root.appendingPathComponent("daemon.lock").path, O_CREAT | O_RDWR, 0o600)
+let lock = openCompanionLock(root)
 guard lock >= 0 else { fputs("Cannot open overview lock\n", stderr); exit(1) }
 guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { exit(0) }
 MainActor.assumeIsolated {

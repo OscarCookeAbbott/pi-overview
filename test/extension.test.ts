@@ -83,6 +83,15 @@ test("factory starts no resources; disabled settings do not publish or launch", 
   else assert.deepEqual(h.notices, []);
 });
 
+test("status exposes the live companion version and build without starting GUI resources", macOnly, async (t) => {
+  const h = harness(t);
+  await h.emit("session_start");
+  atomicJSON(join(h.root, "daemon.json"), { pid: process.pid, heartbeatAt: Date.now(), version: "0.6.0", build: "1234567890abcdef", instanceId: "test" });
+  await h.command("status");
+  assert.match(h.notices.at(-1)!, /companion running v0\.6\.0 \(12345678\)/);
+  assert.equal(existsSync(join(h.root, "companion.log")), false);
+});
+
 test("parallel tools and intermediate turns remain busy until agent_settled; only assistant text is exposed", macOnly, async (t) => {
   const h = harness(t);
   await h.emit("session_start");

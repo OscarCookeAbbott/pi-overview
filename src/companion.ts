@@ -4,6 +4,9 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout } from "node:timers/promises";
+import { performance } from "node:perf_hooks";
+import { reconcileCompanion, type CompanionBuild, type CompanionHeartbeat } from "./lifecycle.ts";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import { atomicJSON, ensureDirectories } from "./state.ts";
 
@@ -24,17 +27,27 @@ export async function writeLauncher(root: string, cwd: string): Promise<void> {
 }
 
 export async function buildCompanion(root: string, signal?: AbortSignal): Promise<string> {
+  return (await prepareCompanion(root, signal)).executable;
+}
+
+async function prepareCompanion(root: string, signal?: AbortSignal): Promise<CompanionBuild & { executable: string }> {
   signal?.throwIfAborted();
   ensureDirectories(root);
   const names = ["Model.swift", "MenuViews.swift", "AgentComposer.swift", "ContributionMenus.swift", "main.swift"];
   const sources = await Promise.all(names.map((name) => readFile(join(nativeDir, name))));
   signal?.throwIfAborted();
-  const digest = createHash("sha256").update(process.arch);
+  let version: unknown;
+  try { version = (JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown }).version; }
+  catch { throw new Error("Cannot read the Pi Overview package version."); }
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) throw new Error("Invalid Pi Overview package version.");
+  signal?.throwIfAborted();
+  const digest = createHash("sha256").update(process.arch).update("\0").update(version);
   sources.forEach((source, index) => digest.update(names[index]).update("\0").update(source));
   const hash = digest.digest("hex").slice(0, 16);
   const app = join(root, "bin", `Pi Overview-${hash}.app`);
   const executable = join(app, "Contents", "MacOS", "pi-overview");
-  if (existsSync(executable)) return executable;
+  const identity = { version, build: hash, executable };
+  if (existsSync(executable)) return identity;
   const staging = join(root, "bin", `.build-${randomUUID()}.app`);
   await mkdir(join(staging, "Contents", "MacOS"), { recursive: true, mode: 0o700 });
   try {
@@ -47,6 +60,8 @@ export async function buildCompanion(root: string, signal?: AbortSignal): Promis
 <key>CFBundleIdentifier</key><string>dev.pi.overview</string>
 <key>CFBundleName</key><string>Pi Overview</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>${version}</string>
+<key>PiOverviewBuild</key><string>${hash}</string>
 <key>LSUIElement</key><true/>
 </dict></plist>`, { mode: 0o600 });
     await new Promise<void>((resolveBuild, reject) => {
@@ -65,23 +80,55 @@ export async function buildCompanion(root: string, signal?: AbortSignal): Promis
       // Concurrent Pi processes may finish the same source-hashed build first.
       if (!existsSync(executable)) throw error;
     }
-    return executable;
+    return identity;
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
 }
 
-export async function startCompanion(root: string, signal?: AbortSignal): Promise<void> {
-  const executable = await buildCompanion(root, signal);
-  signal?.throwIfAborted();
-  const log = openSync(join(root, "companion.log"), "a", 0o600);
-  try {
-    await new Promise<void>((resolveStart, reject) => {
-      const child = spawn(executable, [root], { detached: true, stdio: ["ignore", log, log], env: process.env });
-      child.once("error", reject);
-      child.once("spawn", () => { child.unref(); resolveStart(); });
-    });
-  } finally {
-    closeSync(log);
+function companionProcessAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
   }
+}
+
+export async function readCompanionHeartbeat(root: string): Promise<CompanionHeartbeat | undefined> {
+  let value: CompanionHeartbeat;
+  try { value = JSON.parse(await readFile(join(root, "daemon.json"), "utf8")) as CompanionHeartbeat; }
+  catch (error) {
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  const age = Date.now() - Math.floor(value?.heartbeatAt);
+  if (!value || !Number.isInteger(value.pid) || value.pid <= 0 || typeof value.heartbeatAt !== "number" || !Number.isFinite(age) || age < 0 || age >= 10000) return undefined;
+  for (const key of ["version", "build", "instanceId"] as const) if (value[key] !== undefined && typeof value[key] !== "string") return undefined;
+  if (value.pid > 2147483647 || !companionProcessAlive(value.pid)) return undefined;
+  return value;
+}
+
+export async function startCompanion(root: string, signal?: AbortSignal): Promise<void> {
+  const expected = await prepareCompanion(root, signal);
+  await reconcileCompanion(expected, {
+    read: () => readCompanionHeartbeat(root),
+    exited: (target) => !companionProcessAlive(target.pid),
+    quit(target) {
+      atomicJSON(join(root, "daemon-command.json"), { action: "quit", createdAt: Date.now(), pid: target.pid, ...(target.instanceId ? { instanceId: target.instanceId } : {}) });
+    },
+    async launch() {
+      signal?.throwIfAborted();
+      const log = openSync(join(root, "companion.log"), "a", 0o600);
+      try {
+        await new Promise<void>((resolveStart, reject) => {
+          const child = spawn(expected.executable, [root], { detached: true, stdio: ["ignore", log, log], env: process.env });
+          child.once("error", reject);
+          child.once("spawn", () => { child.unref(); resolveStart(); });
+        });
+      } finally { closeSync(log); }
+    },
+    wait: (signal) => setTimeout(100, undefined, { signal }),
+    now: () => performance.now(),
+  }, signal);
 }

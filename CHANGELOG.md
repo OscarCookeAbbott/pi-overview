@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Embed/publish companion version and source-build identity; reload/start reuses current or newer apps and cooperatively replaces outdated/legacy apps without stopping Pi agents.
+- Target upgrade quit requests to a companion incarnation, bound waits/cancellation, and prevent singleton-lock inheritance by agent children.
+- Expose the running version/build through `/overview` and a GUI-free native `--version` command.
+
 ## 0.5.2
 
 - Use an unenclosed native play triangle for running and plain pause bars for idle/pending across menubar, agent, task and job indicators.

@@ -1,9 +1,30 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { buildCompanion, writeLauncher } from "../src/companion.ts";
+import { buildCompanion, readCompanionHeartbeat, writeLauncher } from "../src/companion.ts";
+
+test("heartbeat reads accept live legacy/current companions and ignore stale, malformed or dead records", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pi-overview-heartbeat-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.mock.method(Date, "now", () => 100000);
+  assert.equal(await readCompanionHeartbeat(root), undefined);
+  for (const identity of [{}, { version: "0.6.0", build: "hash", instanceId: "current", heartbeatAt: 100000.5 }]) {
+    const info = { pid: process.pid, heartbeatAt: 100000, ...identity };
+    writeFileSync(join(root, "daemon.json"), JSON.stringify(info));
+    assert.deepEqual(await readCompanionHeartbeat(root), info);
+  }
+  for (const info of [null, { pid: -1, heartbeatAt: 100000 }, { pid: process.pid, heartbeatAt: 1 },
+    { pid: process.pid, heartbeatAt: 200000 }, { pid: process.pid, heartbeatAt: "100000" },
+    { pid: process.pid, heartbeatAt: 100000, instanceId: {} }]) {
+    writeFileSync(join(root, "daemon.json"), JSON.stringify(info));
+    assert.equal(await readCompanionHeartbeat(root), undefined);
+  }
+  writeFileSync(join(root, "daemon.json"), "invalid");
+  assert.equal(await readCompanionHeartbeat(root), undefined);
+});
 
 test("cancelled builds do not start filesystem/compiler resources", async () => {
   const controller = new AbortController();
@@ -25,7 +46,14 @@ test("concurrent asynchronous builds produce one cached app; launcher contains p
   assert.equal(binaries[0], binaries[1]);
   const binary = binaries[0];
   assert.ok(existsSync(binary));
-  assert.match(readFileSync(join(dirname(dirname(binary)), "Info.plist"), "utf8"), /LSUIElement/);
+  const plist = readFileSync(join(dirname(dirname(binary)), "Info.plist"), "utf8");
+  assert.match(plist, /LSUIElement/);
+  const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  assert.ok(plist.includes(`<key>CFBundleShortVersionString</key><string>${version}</string>`));
+  assert.match(plist, /<key>PiOverviewBuild<\/key><string>[a-f0-9]{16}<\/string>/);
+  const identity = JSON.parse(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }));
+  assert.equal(identity.version, version);
+  assert.match(identity.build, /^[a-f0-9]{16}$/);
   const modified = statSync(binary).mtimeMs;
   assert.equal(await buildCompanion(root), binary);
   assert.equal(statSync(binary).mtimeMs, modified);

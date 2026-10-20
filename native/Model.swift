@@ -97,6 +97,36 @@ enum OverviewError: Error, LocalizedError {
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
 
+func openCompanionLock(_ root: URL) -> Int32 {
+    open(root.appendingPathComponent("daemon.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+}
+
+struct CompanionBuild: Codable {
+    var version: String
+    var build: String
+    static var current: CompanionBuild {
+        CompanionBuild(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                       build: Bundle.main.object(forInfoDictionaryKey: "PiOverviewBuild") as? String ?? "unknown")
+    }
+}
+
+struct CompanionInfo: Codable {
+    var pid: Int32
+    var instanceId: String
+    var version: String
+    var build: String
+    var heartbeatAt: Double
+}
+
+func companionShouldQuit(_ data: Data, pid: Int32, instanceId: String, now: Double = nowMillis()) -> Bool {
+    guard let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          value["action"] as? String == "quit", let time = value["createdAt"] as? Double,
+          now >= time, now - time < 10000 else { return false }
+    if let target = value["pid"], (target as? Int32) != pid { return false }
+    if let target = value["instanceId"], (target as? String) != instanceId { return false }
+    return true
+}
+
 func nowMillis() -> Double { Date().timeIntervalSince1970 * 1000 }
 func displayText(_ text: String, limit: Int = 160) -> String {
     String(text.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }.joined().prefix(limit))

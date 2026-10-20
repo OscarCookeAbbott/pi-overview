@@ -62,21 +62,33 @@ struct NativeTests {
         expect(deduplicateSessions([staleStarting, finished]).map { $0.id } == [finished.id], "stale launch placeholders do not hide newer finished sessions")
     }
 
-    static func main() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pi-overview-native-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("records"), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("commands"), withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID().uuidString.lowercased()
-        let session = root.appendingPathComponent("session 'quoted'.jsonl")
-        try Data("session".utf8).write(to: session)
-        var info = InstanceInfo(id: id, token: UUID().uuidString.lowercased(), pid: getpid(), cwd: root.path,
-                                projectName: "Example", sessionFile: session.path, status: "Thinking", busy: true,
-                                closed: false, lastOutput: "Preview", updatedAt: nowMillis(), heartbeatAt: nowMillis())
-        let file = root.appendingPathComponent("records/\(id).json")
-        try writeJSON(info, to: file)
-        expect(InstanceInfo.read(file)?.id == id, "snapshot round-trip")
-        expect(info.isLive(), "fresh live process")
+    static func testCompanionLifecycle(root: URL) throws {
+        let descriptor = openCompanionLock(root)
+        expect(descriptor >= 0, "companion lock opens")
+        defer { close(descriptor) }
+        expect(fcntl(descriptor, F_GETFD) & FD_CLOEXEC != 0, "agent children must not inherit the companion singleton lock")
+        let identity = CompanionInfo(pid: getpid(), instanceId: "current", version: "0.6.0", build: "hash", heartbeatAt: 1000)
+        let data = try JSONEncoder().encode(identity)
+        let decoded = try JSONDecoder().decode(CompanionInfo.self, from: data)
+        expect(decoded.instanceId == "current", "heartbeat preserves build/process identity")
+        for (fields, expected) in [
+            (["action": "quit", "createdAt": 1000] as [String: Any], true),
+            (["action": "quit", "createdAt": 1000, "pid": getpid(), "instanceId": "current"], true),
+            (["action": "quit", "createdAt": 1000, "pid": getpid() + 1], false),
+            (["action": "quit", "createdAt": 1000, "pid": getpid(), "instanceId": "previous"], false),
+            (["action": "quit", "createdAt": 1000, "instanceId": 12], false),
+            (["action": "quit", "createdAt": 1001], false),
+            (["action": "quit", "createdAt": -10000], false),
+            (["action": "launch", "createdAt": 1000], false)
+        ] {
+            let command = try JSONSerialization.data(withJSONObject: fields)
+            expect(companionShouldQuit(command, pid: getpid(), instanceId: "current", now: 1000) == expected,
+                   "only fresh manual or matching-instance quit requests are accepted")
+        }
+        expect(!companionShouldQuit(Data("invalid".utf8), pid: getpid(), instanceId: "current", now: 1000), "malformed commands are ignored")
+    }
+
+    static func testStateSymbols(_ info: InstanceInfo) {
         var complete = info
         complete.id = UUID().uuidString.lowercased()
         complete.busy = false
@@ -93,6 +105,25 @@ struct NativeTests {
         idle.status = "Ready"
         expect(idle.displayStatus == "Idle" && agentSymbol(idle) == "‖", "legacy Ready records are presented as Idle")
         expect(complete.displayStatus == "Completed", "completion labels remain distinct from idle")
+    }
+
+    static func main() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pi-overview-native-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("records"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("commands"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try testCompanionLifecycle(root: root)
+        let id = UUID().uuidString.lowercased()
+        let session = root.appendingPathComponent("session 'quoted'.jsonl")
+        try Data("session".utf8).write(to: session)
+        var info = InstanceInfo(id: id, token: UUID().uuidString.lowercased(), pid: getpid(), cwd: root.path,
+                                projectName: "Example", sessionFile: session.path, status: "Thinking", busy: true,
+                                closed: false, lastOutput: "Preview", updatedAt: nowMillis(), heartbeatAt: nowMillis())
+        let file = root.appendingPathComponent("records/\(id).json")
+        try writeJSON(info, to: file)
+        expect(InstanceInfo.read(file)?.id == id, "snapshot round-trip")
+        expect(info.isLive(), "fresh live process")
+        testStateSymbols(info)
         info.contributions = [
             OverviewContribution(id: "tasks", badge: "3/6 tasks", sections: [OverviewSection(title: "Tasks", items: [
                 OverviewItem(title: "[ab] Build", state: "running", detail: "Run tests")

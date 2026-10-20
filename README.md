@@ -13,7 +13,7 @@ pi install git:github.com/OscarCookeAbbott/pi-overview
 
 Run `/reload` in each existing Pi instance you want to see. Other instances appear as they start with this package enabled. It cannot discover Pi processes that have not loaded the extension.
 
-The first interactive session compiles the companion asynchronously. Pi remains usable while Swift compiles; subsequent starts reuse a source/architecture-hashed `.app` cache. Look for **π** in the macOS menu bar. Missing compiler or build failures warn in Pi rather than failing the session.
+The first interactive session compiles the companion asynchronously. Pi remains usable while Swift compiles; subsequent starts reuse a version/source/architecture-hashed `.app` cache. Look for **π** in the macOS menu bar. Missing compiler or build failures warn in Pi rather than failing the session.
 
 For local development, run `pi -e ./pi-overview/src/index.ts` from the parent directory.
 
@@ -36,12 +36,12 @@ Ghostty is checked at `/Applications/Ghostty.app`. The Terminal.app fallback may
 
 ## Commands
 
-- `/overview`: show companion/session status and the data directory.
-- `/overview start`: build if needed and request the companion. A native advisory lock prevents duplicate menu bars even if several Pi processes start simultaneously.
-- `/overview stop`: cancel a pending build and ask the companion to quit. Agents keep running. Allow a couple of seconds for its polling loop to exit before starting it again.
+- `/overview`: show companion/session status, running version/build and the data directory.
+- `/overview start`: build if needed, reuse a matching/newer companion or cooperatively replace an outdated one. A native advisory lock prevents duplicate menu bars even if several Pi processes start simultaneously.
+- `/overview stop`: cancel pending startup/replacement and ask the companion to quit. Agents keep running. Allow a couple of seconds for its polling loop to exit before starting it again.
 - `/overview folder`: open the data directory in Finder.
 
-After upgrading native companion code, quit the existing menu bar first, then run `/overview start`; a running older companion keeps its singleton lock until it exits. `/reload` updates the TypeScript publisher. No login item or launchd agent is installed.
+With `autoStart: true` (default), `/reload` also checks the running companion's package version and architecture/source build hash. A matching or newer release is reused. An outdated or legacy companion is asked to quit; its replacement starts after the old process exits. Compilation happens first, so a build failure leaves the existing app alone. Replacement waits are bounded to 15 seconds after compilation and never force-kill processes. The companion handoff itself does not stop Pi/agent processes; other extensions' normal reload behavior is unchanged. Unsubmitted menu-composer drafts reset when the app is replaced. With `autoStart: false`, use `/overview start` to perform this check manually. No login item or launchd agent is installed.
 
 ## Configuration
 
@@ -98,10 +98,12 @@ records/       Per-runtime UUID snapshots, including recently closed instances
 commands/      Expiring, token-addressed abort/shutdown requests
 sessions/      Exact session files for menu-launched background tasks
 logs/          stdout/stderr logs for those tasks
-bin/           Source-hashed, locally compiled app bundles
+bin/           Version/source/architecture-hashed app bundles
 launcher.json  Current Node/Pi/extension paths and configured new-agent directory
 build.log      Compiler diagnostics on failure
 companion.log  Native companion diagnostics
+daemon.json    Companion PID, incarnation, version/build and heartbeat
+daemon-command.json  Expiring manual or incarnation-targeted quit request
 ```
 
 `PI_OVERVIEW_DIR` overrides the directory, mainly for isolated testing. Directories are owner-only and atomic JSON snapshots/requests are mode 0600. Credentials and environment values are not written into launch configuration. The companion inherits the environment of the Pi process that launched it; restart it after changing environment-based credentials or PATH.

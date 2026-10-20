@@ -1,8 +1,8 @@
 import { basename, join, resolve } from "node:path";
-import { readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { startCompanion, writeLauncher } from "./companion.ts";
+import { readCompanionHeartbeat, startCompanion, writeLauncher } from "./companion.ts";
+import type { CompanionHeartbeat } from "./lifecycle.ts";
 import { atomicJSON, InstancePublisher, preview, readConfig } from "./state.ts";
 import { normalizeContribution, PI_OVERVIEW_KEY, type OverviewContribution, type OverviewService } from "./contributions.ts";
 
@@ -173,7 +173,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
       const action = args.trim() || "status";
       if (!publisher) { ctx.ui.notify("Pi Overview is disabled or could not initialise; check overview settings and session warnings.", "warning"); return; }
       try {
-        if (action === "start") { await writeLauncher(root, config.defaultDirectory); await start(); ctx.ui.notify("Pi Overview launch requested. An existing companion is reused.", "info"); }
+        if (action === "start") { await writeLauncher(root, config.defaultDirectory); await start(); ctx.ui.notify("Pi Overview is ready.", "info"); }
         else if (action === "stop") {
           controller.abort();
           controller = new AbortController();
@@ -183,13 +183,11 @@ export default function overviewExtension(pi: ExtensionAPI): void {
         }
         else if (action === "folder") await new Promise<void>((done, reject) => execFile("/usr/bin/open", [root], { timeout: 5000 }, (error) => error ? reject(error) : done()));
         else if (action === "status") {
-          let running = false;
-          try {
-            const info = JSON.parse(readFileSync(join(root, "daemon.json"), "utf8")) as { heartbeatAt?: number };
-            running = typeof info.heartbeatAt === "number" && Date.now() - info.heartbeatAt < 10000;
-          } catch { /* Missing or stale companion metadata is not a session error. */ }
+          let companion: CompanionHeartbeat | undefined;
+          try { companion = await readCompanionHeartbeat(root); }
+          catch { /* Missing or stale companion metadata is not a session error. */ }
           let status = startup ? "companion building/starting" : "companion not running";
-          if (running) status = "companion running";
+          if (companion) status = `companion running${companion.version ? ` v${preview(companion.version)}` : ""}${companion.build ? ` (${preview(companion.build).slice(0, 8)})` : ""}`;
           ctx.ui.notify(`Pi Overview: ${status}\nState: ${publisher.snapshot.status}\nDirectory: ${root}`, "info");
         } else ctx.ui.notify("Usage: /overview [status|start|stop|folder]", "warning");
       } catch (error) { ctx.ui.notify(`Pi Overview: ${error instanceof Error ? error.message : String(error)}`, "warning"); }

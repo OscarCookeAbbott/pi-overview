@@ -13,4 +13,4 @@ Keep Pi host-provided and avoid third-party notification/UI SDKs. Node tests mus
 
 Preserve the safety contracts: no startup resources in the extension factory, no shell evaluation of prompts, no automatic project trust, no PID-file signalling, fresh/expiring control tokens, private atomic state, exact inactive-session resume, and orderly lifecycle cleanup. Treat output and filesystem paths as untrusted text. Background logs and normal Pi session history must never be deleted by overview-entry cleanup.
 
-For a release, update package and lockfile versions, add a changelog entry, run the checks, and tag `v<version>`. Native source changes create a new cached app bundle; users must quit the old companion before starting the new one.
+For a release, update package and lockfile versions, add a changelog entry, run the checks, and tag `v<version>`. Version/native source changes create a new cached app bundle. Reload/start cooperatively replaces outdated companions; keep targeted quit checks, cancellation/deadlines and the close-on-exec singleton lock covered. Tests may execute the bundle's `--version` path, never its GUI entry point.
