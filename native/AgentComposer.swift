@@ -27,7 +27,7 @@ final class AgentComposer: NSView, NSTextViewDelegate {
     let editor = AgentPromptEditor()
     let directoryLabel = NSTextField(labelWithString: "")
     let errorLabel = NSTextField(wrappingLabelWithString: "")
-    let startButton = NSButton(title: "Start", target: nil, action: nil)
+    let startButton = NSButton(title: "⌘↩", target: nil, action: nil)
     let directoryButton = NSButton(title: "", target: nil, action: nil)
     var directoryPicker: (String?) -> String? = { current in
         NSApp.activate(ignoringOtherApps: true)
@@ -42,7 +42,6 @@ final class AgentComposer: NSView, NSTextViewDelegate {
     }
     private let onSubmit: (String, String) throws -> Void
     private let scroll = NSScrollView()
-    private let hint = NSTextField(labelWithString: "⌘↩ Start · Esc keeps draft")
     private var defaultDirectory: String?
     private var selectedDirectory: String?
     var directory: String? { selectedDirectory ?? defaultDirectory }
@@ -58,30 +57,10 @@ final class AgentComposer: NSView, NSTextViewDelegate {
 
     init(onSubmit: @escaping (String, String) throws -> Void) {
         self.onSubmit = onSubmit
-        super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 162))
+        super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 104))
         identifier = NSUserInterfaceItemIdentifier("overview.agent-composer")
-        let heading = NSTextField(labelWithString: "New agent")
-        heading.font = .systemFont(ofSize: 13, weight: .semibold)
-        heading.frame = NSRect(x: 12, y: 10, width: 336, height: 20)
-        heading.autoresizingMask = [.width]
-        addSubview(heading)
-        directoryLabel.font = .systemFont(ofSize: 11)
-        directoryLabel.textColor = .secondaryLabelColor
-        directoryLabel.lineBreakMode = .byTruncatingMiddle
-        directoryLabel.frame = NSRect(x: 12, y: 34, width: 298, height: 16)
-        directoryLabel.autoresizingMask = [.width]
-        addSubview(directoryLabel)
-        directoryButton.frame = NSRect(x: 316, y: 30, width: 32, height: 24)
-        directoryButton.autoresizingMask = [.minXMargin]
-        directoryButton.bezelStyle = .rounded
-        directoryButton.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "Choose agent directory")
-        directoryButton.imagePosition = .imageOnly
-        directoryButton.toolTip = "Choose directory for this agent"
-        directoryButton.setAccessibilityLabel("Choose directory for this agent")
-        directoryButton.target = self
-        directoryButton.action = #selector(chooseDirectory(_:))
-        addSubview(directoryButton)
-        scroll.frame = NSRect(x: 12, y: 56, width: 336, height: 64)
+        autoresizingMask = [.width]
+        scroll.frame = NSRect(x: 12, y: 10, width: 336, height: 54)
         scroll.autoresizingMask = [.width]
         scroll.borderType = .noBorder
         scroll.wantsLayer = true
@@ -100,7 +79,7 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         editor.isAutomaticSpellingCorrectionEnabled = false
         editor.isVerticallyResizable = true
         editor.isHorizontallyResizable = false
-        editor.minSize = NSSize(width: 0, height: 64)
+        editor.minSize = NSSize(width: 0, height: 54)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.autoresizingMask = [.width]
         editor.textContainer?.widthTracksTextView = true
@@ -108,25 +87,45 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         editor.textContainerInset = NSSize(width: 4, height: 4)
         editor.delegate = self
         editor.setAccessibilityLabel("New agent prompt")
+        editor.toolTip = "⌘Return starts the agent. Escape closes the menu and keeps the draft."
         editor.onSubmit = { [weak self] in self?.submit(nil) }
         editor.onCancel = { [weak self] in self?.enclosingMenuItem?.menu?.cancelTracking() }
         scroll.documentView = editor
         addSubview(scroll)
-        hint.font = .systemFont(ofSize: 10)
-        hint.textColor = .secondaryLabelColor
-        hint.frame = NSRect(x: 12, y: 132, width: 240, height: 18)
-        hint.autoresizingMask = [.width]
-        addSubview(hint)
-        startButton.frame = NSRect(x: 270, y: 126, width: 78, height: 28)
+        directoryButton.frame = NSRect(x: 12, y: 70, width: 24, height: 24)
+        directoryButton.isBordered = false
+        directoryButton.controlSize = .small
+        directoryButton.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "Choose agent directory")
+        directoryButton.imagePosition = .imageOnly
+        directoryButton.setAccessibilityLabel("Choose directory for this agent")
+        directoryButton.target = self
+        directoryButton.action = #selector(chooseDirectory(_:))
+        addSubview(directoryButton)
+        directoryLabel.font = .systemFont(ofSize: 11)
+        directoryLabel.textColor = .secondaryLabelColor
+        directoryLabel.lineBreakMode = .byTruncatingMiddle
+        directoryLabel.frame = NSRect(x: 42, y: 74, width: 238, height: 16)
+        directoryLabel.autoresizingMask = [.width]
+        addSubview(directoryLabel)
+        startButton.frame = NSRect(x: 288, y: 70, width: 60, height: 24)
         startButton.autoresizingMask = [.minXMargin]
         startButton.bezelStyle = .rounded
+        startButton.controlSize = .small
+        startButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        startButton.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Start agent")
+        startButton.image?.size = NSSize(width: 12, height: 12)
+        startButton.imagePosition = .imageLeft
+        startButton.keyEquivalent = "\r"
+        startButton.keyEquivalentModifierMask = [.command]
+        startButton.toolTip = "Start agent (⌘Return). Escape keeps the draft."
+        startButton.setAccessibilityLabel("Start agent")
         startButton.target = self
         startButton.action = #selector(submit(_:))
         addSubview(startButton)
         errorLabel.font = .systemFont(ofSize: 11)
         errorLabel.textColor = .systemRed
         errorLabel.maximumNumberOfLines = 2
-        errorLabel.frame = NSRect(x: 12, y: 126, width: 240, height: 28)
+        errorLabel.frame = NSRect(x: 42, y: 70, width: 238, height: 28)
         errorLabel.autoresizingMask = [.width]
         addSubview(errorLabel)
         updateBorder()
@@ -174,8 +173,9 @@ final class AgentComposer: NSView, NSTextViewDelegate {
     }
 
     private func updateState() {
-        directoryLabel.stringValue = directory.map { "Directory: \($0)" } ?? "Directory unavailable"
+        directoryLabel.stringValue = directory.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "Choose a directory"
         directoryLabel.toolTip = directory
+        directoryButton.toolTip = directory.map { "Choose agent directory\n\($0)" } ?? "Choose agent directory"
         var isDirectory: ObjCBool = false
         let validDirectory = directory.map { $0.hasPrefix("/") && FileManager.default.fileExists(atPath: $0, isDirectory: &isDirectory) && isDirectory.boolValue } ?? false
         let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -188,7 +188,7 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         errorLabel.stringValue = error ?? ""
         errorLabel.toolTip = error
         errorLabel.isHidden = error == nil
-        hint.isHidden = error != nil
+        directoryLabel.isHidden = error != nil
         startButton.isEnabled = !submitting && configurationError == nil && validDirectory && !value.isEmpty && !tooLong
         directoryButton.isEnabled = !submitting
         editor.needsDisplay = true

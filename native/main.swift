@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     var timer: Timer?
     var actions: [MenuAction] = []
+    var agentCards: [String: AgentCard] = [:]
+    var menuOpen = false
     var children: [String: (Process, FileHandle)] = [:]
     var phase = 0
     let contributionMenus = ContributionMenus()
@@ -63,7 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             children.removeValue(forKey: id)
         }
         let instances = loadInstances(root: root)
-        let live = deduplicateSessions(instances).filter { $0.isLive() }
+        let sessions = deduplicateSessions(instances)
+        let live = sessions.filter { $0.isLive() }
+        if menuOpen {
+            for info in sessions { agentCards[info.id]?.configure(info) }
+        }
         phase = (phase + 1) % 4
         if let button = item.button {
             let title = menubarTitle(instances, phase: phase)
@@ -84,10 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
+        menuOpen = true
+        menu.minimumWidth = overviewMenuWidth
         actions.removeAll()
+        agentCards.removeAll()
         contributionMenus.reset()
         do { agentComposer.configure(directory: try launcher().cwd) }
         catch { agentComposer.configure(directory: nil, error: error.localizedDescription) }
+        agentComposer.setFrameSize(NSSize(width: overviewMenuWidth, height: agentComposer.frame.height))
         let composerItem = NSMenuItem(title: "New agent", action: nil, keyEquivalent: "")
         composerItem.view = agentComposer
         menu.addItem(composerItem)
@@ -95,43 +105,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let registrations = loadInstances(root: root)
         let instances = deduplicateSessions(registrations)
         if instances.isEmpty { menu.addItem(entry("No Pi instances", enabled: false)) }
-        for info in instances {
-            let live = info.isLive()
-            let state = agentState(info)
-            let badges = badgeText(info)
-            let name = displayText(info.sessionName ?? info.projectName, limit: 60)
-            let status = displayText(live || info.closed ? info.displayStatus : "Disconnected", limit: 50)
-            let heading = entry("\(name) · \(status)" + (badges.isEmpty ? "" : " " + badges))
-            applyStatusIcon(heading, state: state)
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            let statusRow = entry(status, enabled: false)
-            applyStatusIcon(statusRow, state: state)
-            submenu.addItem(statusRow)
-            submenu.addItem(entry(displayText(info.cwd, limit: 180), enabled: false))
-            submenu.addItem(entry("PID \(info.pid) · \(info.id.prefix(8))", enabled: false))
-            submenu.addItem(entry(info.lastOutput.isEmpty ? "No assistant output yet" : displayText(info.lastOutput, limit: 60), enabled: false))
-            if !info.lastOutput.isEmpty {
-                submenu.addItem(entry("Copy Output Preview") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(info.lastOutput, forType: .string)
-                })
-            }
-            addContributions(info, to: submenu)
-            submenu.addItem(.separator())
-            submenu.addItem(entry("Open Project in Terminal") { [weak self] in self?.openTerminal(info, resume: false) })
-            submenu.addItem(entry("Resume This Session in Terminal", enabled: canResume(info, among: registrations)) { [weak self] in self?.openTerminal(info, resume: true) })
-            if let log = info.logFile, FileManager.default.fileExists(atPath: log) {
-                submenu.addItem(entry("Open Run Log") { NSWorkspace.shared.open(URL(fileURLWithPath: log)) })
-            }
-            if let session = info.sessionFile, FileManager.default.fileExists(atPath: session) {
-                submenu.addItem(entry("Reveal Session File") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session)]) })
-            }
-            submenu.addItem(.separator())
-            submenu.addItem(entry("Abort Run", enabled: live && info.busy && info.pid > 0) { [weak self] in self?.control(info, action: "abort") })
-            submenu.addItem(entry("Quit Pi Instance…", enabled: live && info.pid > 0) { [weak self] in self?.control(info, action: "shutdown") })
-            heading.submenu = submenu
-            menu.addItem(heading)
+        for (index, info) in instances.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            let rows = contributionMenus.makeAgentItems(info, actions: makeAgentActions(info, registrations: registrations), phase: phase, refresh: { [weak self] in
+                guard let root = self?.root else { return nil }
+                return InstanceInfo.read(root.appendingPathComponent("records/\(info.id).json"))
+            })
+            agentCards[info.id] = rows.first?.view as? AgentCard
+            for row in rows { menu.addItem(row) }
         }
         menu.addItem(.separator())
         menu.addItem(entry("Clear Finished Entries") { [weak self] in
@@ -143,17 +124,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         menu.addItem(entry("Open Overview Folder") { [weak self] in if let root = self?.root { NSWorkspace.shared.open(root) } })
         menu.addItem(entry("Quit Menu Bar (Keep Pi Running)") { NSApp.terminate(nil) })
+        fitMenuViews(menu)
     }
 
-    func addContributions(_ info: InstanceInfo, to menu: NSMenu) {
-        let sections = menuContributions(info).flatMap { $0.sections }.filter { !$0.items.isEmpty }
-        guard !sections.isEmpty else { return }
-        menu.addItem(.separator())
-        for section in sections {
-            let heading = entry(displayText(section.title, limit: 40))
-            heading.submenu = contributionMenus.makeItemsMenu(section.items, phase: phase)
-            menu.addItem(heading)
+    func menuDidClose(_ menu: NSMenu) { menuOpen = false }
+
+    func makeAgentActions(_ info: InstanceInfo, registrations: [InstanceInfo]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if !info.lastOutput.isEmpty {
+            menu.addItem(entry("Copy Output Preview") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(info.lastOutput, forType: .string)
+            })
         }
+        menu.addItem(entry("Open Project in Terminal") { [weak self] in self?.openTerminal(info, resume: false) })
+        menu.addItem(entry("Resume This Session in Terminal", enabled: canResume(info, among: registrations)) { [weak self] in self?.openTerminal(info, resume: true) })
+        if let log = info.logFile, FileManager.default.fileExists(atPath: log) {
+            menu.addItem(entry("Open Run Log") { NSWorkspace.shared.open(URL(fileURLWithPath: log)) })
+        }
+        if let session = info.sessionFile, FileManager.default.fileExists(atPath: session) {
+            menu.addItem(entry("Reveal Session File") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session)]) })
+        }
+        menu.addItem(.separator())
+        menu.addItem(entry("Abort Run", enabled: info.isLive() && info.busy && info.pid > 0) { [weak self] in self?.control(info, action: "abort") })
+        menu.addItem(entry("Quit Pi Instance…", enabled: info.isLive() && info.pid > 0) { [weak self] in self?.control(info, action: "shutdown") })
+        return menu
     }
 
     func entry(_ title: String, enabled: Bool = true, action: (() -> Void)? = nil) -> NSMenuItem {

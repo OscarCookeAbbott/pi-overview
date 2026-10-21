@@ -52,6 +52,9 @@ struct NativeMenuTests {
         expect(note.image != nil, "typed notes have a native icon")
         try testStatusSymbols()
         testMenubarSymbols()
+        testMenuWidthContract()
+        testAgentCards()
+        testAgentHoverRefresh()
         testComposerLayout()
         try testComposer()
         print("Native menu tests passed: structured cards, owned notes, scrolling lists and inline composer controls.")
@@ -105,37 +108,141 @@ struct NativeMenuTests {
         }
     }
 
+    static func testMenuWidthContract() {
+        let composer = AgentComposer { _, _ in }
+        expect(composer.autoresizingMask.contains(.width), "custom menu view must opt into NSMenu's full-width resizing before attachment")
+        let menu = NSMenu()
+        let input = NSMenuItem(title: "New agent", action: nil, keyEquivalent: "")
+        input.view = composer
+        menu.addItem(input)
+        menu.addItem(NSMenuItem(title: String(repeating: "Long project name ", count: 6), action: nil, keyEquivalent: ""))
+        menu.update()
+        fitMenuViews(menu)
+        expect(menu.size.width > 600 && composer.frame.width == menu.size.width, "composer must fill a real wider menu, not just a manually resized test view")
+        expect(composer.editor.enclosingScrollView!.frame.maxX == composer.frame.width - 12, "input and footer track the complete menu width")
+        fitMenuViews(menu)
+        expect(composer.frame.width == menu.size.width, "fitting must not grow the menu repeatedly")
+    }
+
+    static func testAgentCards() {
+        let active = OverviewItem(title: "[ab] Build compact cards", state: "running", detail: "Scope", kind: "task")
+        let notes = OverviewItem(title: "Notes", state: "unknown", detail: nil, children: [
+            OverviewItem(title: "<cd> Decision", state: "unknown", detail: "Full note", kind: "note")
+        ], kind: "group")
+        let parent = OverviewItem(title: "[pa] Overhaul", state: "waiting", detail: "Parent details", children: [
+            OverviewItem(title: "Subtasks", state: "unknown", detail: nil, children: [active], kind: "group"), notes
+        ], kind: "task")
+        var info = InstanceInfo(id: UUID().uuidString, token: UUID().uuidString, pid: getpid(), cwd: "/tmp/project",
+                                projectName: "Project", sessionName: "UI overhaul", status: "Running: read", busy: true, closed: false,
+                                lastOutput: "Legacy message preview", updatedAt: nowMillis(), heartbeatAt: nowMillis())
+        info.contributions = [
+            OverviewContribution(id: "tasks", badge: "0/2 tasks", sections: [OverviewSection(title: "Tasks", items: [parent])]),
+            OverviewContribution(id: "jobs", badge: "", sections: [OverviewSection(title: "Running jobs", items:
+                (0..<50).map { OverviewItem(title: "[jb] Job \($0)", state: "running", detail: "Command", kind: "job") }
+            )])
+        ]
+        let renderer = ContributionMenus()
+        let actions = NSMenu()
+        actions.addItem(NSMenuItem(title: "Open Project in Terminal", action: nil, keyEquivalent: ""))
+        let rows = renderer.makeAgentItems(info, actions: actions)
+        guard let card = rows.first?.view as? AgentCard else { expect(false, "agent summary is a visible root card"); return }
+        expect(rows.first?.submenu == nil, "agent information must not require a first-level agent hover")
+        expect(card.titleLabel.stringValue == "UI overhaul" && card.metadataLabel.stringValue.contains("Running: read"), "name/status are visible on the main card")
+        expect(card.metadataLabel.stringValue.contains("/tmp/project") && card.metadataLabel.toolTip?.contains("PID") == true, "path stays visible while diagnostics move out of the main text")
+        expect(!card.subviews.contains { $0 is NSBox }, "agent sections use native menu spacing, not boxed web-style panels")
+        expect([card.metadataLabel, card.taskLabel, card.activityLabel].allSatisfy { $0.frame.minX == card.titleLabel.frame.minX }, "agent text shares one native list column")
+        expect(card.taskLabel.stringValue == "▶ [ab] Build compact cards", "active nested task is visible without hovering")
+        expect(card.activityLabel.stringValue == "Legacy message preview", "old snapshots retain their message preview")
+        expect(rows.count == 4 && rows[1].title == "Tasks · 0/2" && rows[2].title == "Running jobs", "contributions sit directly beneath the card")
+        expect(rows[3].submenu === actions, "existing controls remain reachable under Actions")
+        let tasks = rows[1].submenu!, jobs = rows[2].submenu!
+        renderer.menuWillOpen(tasks)
+        renderer.menuWillOpen(jobs)
+        expect(tasks.items.map { $0.title } == ["[pa] Overhaul", "[ab] Build compact cards"], "one task hover exposes all descendants")
+        expect(tasks.items[1].indentationLevel == 1, "flattened tasks retain their hierarchy visually")
+        expect(jobs.items.count == 50 && jobs.items.last?.title == "[jb] Job 49", "one job hover exposes every job without caps")
+        let details = tasks.items[0].submenu!
+        renderer.menuWillOpen(details)
+        expect(details.items.contains { $0.title == "Notes (1)" }, "owned notes/details remain reachable")
+        expect(!details.items.contains { $0.title.hasPrefix("Subtasks") }, "task navigation does not reintroduce redundant nesting")
+        let activeHeight = card.frame.height
+        info.lastActivity = "Tool finished · read"
+        card.configure(info)
+        card.setFrameSize(NSSize(width: 640, height: card.frame.height))
+        expect(card.activityLabel.stringValue == "Tool finished · read" && card.frame.height == activeHeight, "activity changes preserve the current section height")
+        expect(card.activityLabel.frame.height <= 18, "short activity does not reserve a blank second line")
+        expect(card.activityLabel.maximumNumberOfLines == 2 && card.activityLabel.frame.maxX == card.frame.width - 16, "compact multiline activity stretches with the card")
+        info.contributions = []
+        card.configure(info)
+        expect(card.taskLabel.isHidden && card.frame.height < activeHeight, "agents without active tasks do not reserve an empty task row")
+        expect([card.titleLabel, card.metadataLabel, card.activityLabel].allSatisfy { card.bounds.contains($0.frame) }, "compact section content stays inside its resized bounds")
+        info.lastActivity = ""
+        info.lastOutput = ""
+        card.configure(info)
+        expect(card.activityLabel.isHidden && card.frame.height <= 54, "empty activity does not reserve a placeholder row")
+    }
+
+    static func testAgentHoverRefresh() {
+        var info = InstanceInfo(id: UUID().uuidString, token: UUID().uuidString, pid: getpid(), cwd: "/tmp",
+                                projectName: "Refresh", status: "Working", busy: true, closed: false,
+                                lastOutput: "", updatedAt: nowMillis(), heartbeatAt: nowMillis())
+        info.contributions = [OverviewContribution(id: "jobs", badge: "", sections: [OverviewSection(title: "Running jobs", items: [
+            OverviewItem(title: "Old snapshot", state: "running", detail: "Old command", kind: "job")
+        ])])]
+        var latest = info
+        let renderer = ContributionMenus()
+        let rows = renderer.makeAgentItems(info, actions: NSMenu(), refresh: { latest })
+        latest.contributions = [OverviewContribution(id: "jobs", badge: "", sections: [OverviewSection(title: "Running jobs", items: [
+            OverviewItem(title: "Latest job", state: "running", detail: "New command", kind: "job")
+        ])])]
+        let jobs = rows[1].submenu!
+        renderer.menuWillOpen(jobs)
+        expect(jobs.items.first?.title == "Latest job", "hover lists read current agent data rather than the menu-open snapshot")
+        let staleRows = renderer.makeAgentItems(info, actions: NSMenu(), refresh: { nil })
+        renderer.menuWillOpen(staleRows[1].submenu!)
+        expect(staleRows[1].submenu!.items.first?.title == "No items", "deleted agent records never fall back to stale running jobs")
+        info.contributions = [OverviewContribution(id: "other", badge: "", sections: [
+            OverviewSection(title: "Same name", items: [OverviewItem(title: "First", state: "pending", detail: nil)]),
+            OverviewSection(title: "Same name", items: [OverviewItem(title: "Second", state: "pending", detail: nil)])
+        ])]
+        let duplicateSections = renderer.makeAgentItems(info, actions: NSMenu())
+        for index in 1...2 { renderer.menuWillOpen(duplicateSections[index].submenu!) }
+        expect(duplicateSections[1].submenu!.items.first?.title == "First" && duplicateSections[2].submenu!.items.first?.title == "Second",
+               "duplicate section titles retain all distinct contributed items")
+    }
+
     static func testComposerLayout() {
         let composer = AgentComposer { _, _ in }
         composer.configure(directory: FileManager.default.temporaryDirectory.path)
-        guard let scroll = composer.editor.enclosingScrollView,
-              let hint = composer.subviews.compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue.hasPrefix("⌘") }) else {
-            expect(false, "composer has a scrollable editor and keyboard hint"); return
-        }
+        guard let scroll = composer.editor.enclosingScrollView else { expect(false, "composer has a scrollable editor"); return }
+        let labels = composer.subviews.compactMap { $0 as? NSTextField }
+        expect(!labels.contains { $0.stringValue == "New agent" || $0.stringValue.hasPrefix("⌘") }, "no redundant heading or standalone shortcut legend")
+        expect(composer.startButton.keyEquivalent == "\r" && composer.startButton.keyEquivalentModifierMask.contains(.command), "Start exposes its command-return shortcut natively")
+        expect(composer.startButton.image != nil && composer.startButton.toolTip?.contains("⌘") == true, "symbolic Start remains discoverable")
         for width: CGFloat in [560, 360, 720] {
             composer.setFrameSize(NSSize(width: width, height: composer.frame.height))
             composer.layoutSubtreeIfNeeded()
             scroll.tile()
-            expect(abs(scroll.frame.maxX - (width - scroll.frame.minX)) < 1, "prompt must stretch with the menu width, retaining equal side insets")
-            expect(abs(composer.editor.frame.width - scroll.contentSize.width) < 1, "editor fills the scroll viewport and wraps at its current width")
-            expect(composer.directoryButton.frame.maxX == scroll.frame.maxX && composer.startButton.frame.maxX == scroll.frame.maxX, "folder and Start buttons remain aligned to the right edge")
-            expect(composer.directoryLabel.frame.minX == scroll.frame.minX && composer.directoryLabel.frame.maxX < composer.directoryButton.frame.minX,
-                   "directory readout stretches without covering its folder button")
-            expect(hint.frame.maxX < composer.startButton.frame.minX, "keyboard hint does not overlap Start at any menu width")
-            expect((48...72).contains(scroll.frame.height) && composer.frame.height <= 180, "composer uses a compact multiline prompt rather than a tall fixed panel")
-            expect(composer.bounds.height - composer.startButton.frame.maxY <= 12, "footer has normal padding, not a reserved blank error row")
-            expect(composer.errorLabel.isHidden && !hint.isHidden, "healthy drafts show the hint without an empty error region")
+            expect(abs(scroll.frame.maxX - (width - scroll.frame.minX)) < 1, "input retains equal insets at every menu width")
+            expect(abs(composer.editor.frame.width - scroll.contentSize.width) < 1, "editor fills the scroll viewport")
+            expect(composer.startButton.frame.maxX == scroll.frame.maxX, "Start stays right-aligned")
+            expect(composer.directoryButton.frame.minY >= scroll.frame.maxY && composer.directoryLabel.frame.minY >= scroll.frame.maxY, "directory controls sit below the input")
+            expect(composer.directoryButton.frame.minX == scroll.frame.minX, "folder button stays left-aligned")
+            expect(composer.directoryLabel.frame.maxX < composer.startButton.frame.minX, "path does not overlap Start")
+            expect((48...64).contains(scroll.frame.height) && composer.frame.height <= 110, "headerless composer is compact but remains multiline")
+            expect(composer.bounds.height - composer.startButton.frame.maxY <= 12, "footer has no empty legend/error row")
+            expect(composer.errorLabel.isHidden && !composer.directoryLabel.isHidden, "valid drafts show the path without empty error space")
         }
         composer.prompt = String(repeating: "A longer multiline draft\n", count: 20)
         composer.editor.sizeToFit()
-        expect(composer.editor.frame.height > scroll.contentSize.height && scroll.hasVerticalScroller, "long drafts still scroll inside the shorter input")
+        expect(composer.editor.frame.height > scroll.contentSize.height && scroll.hasVerticalScroller, "long drafts still scroll")
         let height = composer.frame.height
         composer.configure(directory: nil, error: "Configuration missing")
-        expect(!composer.errorLabel.isHidden && hint.isHidden, "inline errors replace the hint rather than adding a blank row")
-        expect(composer.frame.height == height && composer.errorLabel.frame.maxX < composer.startButton.frame.minX, "errors fit beside Start without resizing the tracking menu")
-        expect(composer.subviews.filter { !$0.isHidden }.allSatisfy { composer.bounds.contains($0.frame) }, "all visible controls fit inside the compact composer")
+        expect(!composer.errorLabel.isHidden && composer.directoryLabel.isHidden && composer.directoryButton.isEnabled, "inline errors replace the path but keep folder selection available")
+        expect(composer.frame.height == height && composer.errorLabel.frame.maxX < composer.startButton.frame.minX, "errors fit without resizing the composer")
+        expect(composer.subviews.filter { !$0.isHidden }.allSatisfy { composer.bounds.contains($0.frame) }, "visible controls fit inside the compact composer")
         composer.configure(directory: FileManager.default.temporaryDirectory.path)
-        expect(composer.errorLabel.isHidden && !hint.isHidden, "clearing the error restores the keyboard hint")
+        expect(composer.errorLabel.isHidden && !composer.directoryLabel.isHidden, "clearing errors restores the path")
     }
 
     static func testComposer() throws {

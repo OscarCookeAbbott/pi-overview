@@ -26,6 +26,85 @@ func menubarAttributedTitle(_ instances: [InstanceInfo], phase: Int = 0) -> NSAt
     return title
 }
 
+let overviewMenuWidth: CGFloat = 420
+
+func fitMenuViews(_ menu: NSMenu) {
+    let width = menu.size.width
+    for item in menu.items {
+        guard let view = item.view, view.autoresizingMask.contains(.width) else { continue }
+        view.setFrameSize(NSSize(width: width, height: view.frame.height))
+    }
+}
+
+/// The first level of agent information belongs in the main menu, not behind a hover.
+final class AgentCard: NSView {
+    let titleLabel = NSTextField(labelWithString: "")
+    let metadataLabel = NSTextField(labelWithString: "")
+    let taskLabel = NSTextField(labelWithString: "")
+    let activityLabel = NSTextField(wrappingLabelWithString: "")
+    let statusView = NSImageView()
+    override var isFlipped: Bool { true }
+
+    init(_ info: InstanceInfo) {
+        super.init(frame: NSRect(x: 0, y: 0, width: overviewMenuWidth, height: 97))
+        identifier = NSUserInterfaceItemIdentifier("overview.agent-card")
+        autoresizingMask = [.width]
+        statusView.frame = NSRect(x: 16, y: 8, width: 14, height: 14)
+        statusView.contentTintColor = .labelColor
+        addSubview(statusView)
+        titleLabel.frame = NSRect(x: 36, y: 6, width: frame.width - 52, height: 18)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        metadataLabel.frame = NSRect(x: 36, y: 26, width: frame.width - 52, height: 14)
+        metadataLabel.font = .systemFont(ofSize: 11)
+        metadataLabel.textColor = .secondaryLabelColor
+        metadataLabel.lineBreakMode = .byTruncatingMiddle
+        taskLabel.frame = NSRect(x: 36, y: 44, width: frame.width - 52, height: 16)
+        taskLabel.font = .systemFont(ofSize: 11)
+        activityLabel.frame = NSRect(x: 36, y: 63, width: frame.width - 52, height: 28)
+        activityLabel.font = .systemFont(ofSize: 11)
+        activityLabel.textColor = .secondaryLabelColor
+        activityLabel.maximumNumberOfLines = 2
+        for label in [titleLabel, metadataLabel, taskLabel, activityLabel] {
+            label.autoresizingMask = [.width]
+            addSubview(label)
+        }
+        titleLabel.lineBreakMode = .byTruncatingTail
+        taskLabel.lineBreakMode = .byTruncatingTail
+        configure(info)
+    }
+
+    required init?(coder: NSCoder) { return nil }
+
+    func configure(_ info: InstanceInfo) {
+        let status = displayText(info.isLive() || info.closed ? info.displayStatus : "Disconnected", limit: 60)
+        titleLabel.stringValue = displayText(info.sessionName ?? info.projectName, limit: 120)
+        titleLabel.toolTip = titleLabel.stringValue
+        statusView.image = statusImage(agentState(info), size: 14)
+        statusView.setAccessibilityLabel(status)
+        let closed = info.closed && !["Closed", "Exited"].contains(info.displayStatus) ? " · Closed" : ""
+        let directory = (info.cwd as NSString).abbreviatingWithTildeInPath
+        metadataLabel.stringValue = "\(status)\(closed) · \(displayText(directory, limit: 180))"
+        metadataLabel.toolTip = "\(status)\n\(displayText(info.cwd, limit: 1024))\nPID \(info.pid) · \(info.id.prefix(8))"
+        let task = activeTaskTitle(info)
+        taskLabel.stringValue = task.map { "▶ \(displayText($0, limit: 180))" } ?? ""
+        taskLabel.isHidden = task == nil
+        taskLabel.textColor = .labelColor
+        taskLabel.toolTip = taskLabel.stringValue
+        let activity = info.lastActivity.flatMap { $0.isEmpty ? nil : $0 } ?? info.lastOutput
+        activityLabel.stringValue = displayText(activity, limit: 300)
+        activityLabel.isHidden = activity.isEmpty
+        activityLabel.toolTip = activity.isEmpty ? nil : displayText(activity, limit: 400)
+        let activityTop: CGFloat = task == nil ? 44 : 63
+        let measured = (activityLabel.stringValue as NSString).boundingRect(
+            with: NSSize(width: max(1, bounds.width - 56), height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: activityLabel.font ?? NSFont.systemFont(ofSize: 11)]).height
+        let activityHeight: CGFloat = activity.isEmpty ? 0 : min(28, max(14, ceil(measured) + 2))
+        activityLabel.frame = NSRect(x: 36, y: activityTop, width: bounds.width - 52, height: activityHeight)
+        setFrameSize(NSSize(width: frame.width, height: activityTop + activityHeight + 6))
+    }
+}
+
 /// Read-only content inside a native submenu; long bodies scroll without flooding the menu.
 final class ContributionCard: NSView {
     let titleLabel: NSTextField
@@ -44,16 +123,20 @@ final class ContributionCard: NSView {
         subtitleLabel = NSTextField(labelWithString: item.subtitle ?? item.state?.capitalized ?? "")
         super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 68 + bodyHeight))
         identifier = NSUserInterfaceItemIdentifier("overview.detail-card")
+        autoresizingMask = [.width]
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.maximumNumberOfLines = 2
         titleLabel.frame = NSRect(x: 12, y: 10, width: 336, height: 34)
+        titleLabel.autoresizingMask = [.width]
         subtitleLabel.font = .systemFont(ofSize: 11)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.frame = NSRect(x: 12, y: 46, width: 336, height: 16)
+        subtitleLabel.autoresizingMask = [.width]
         addSubview(titleLabel)
         addSubview(subtitleLabel)
         if !body.isEmpty {
             scrollView.frame = NSRect(x: 10, y: 66, width: 340, height: bodyHeight)
+            scrollView.autoresizingMask = [.width]
             scrollView.drawsBackground = false
             scrollView.contentView.drawsBackground = false
             scrollView.hasVerticalScroller = true

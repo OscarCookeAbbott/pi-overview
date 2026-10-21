@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Replace per-agent hover wrappers with compact multiline main-menu cards showing status, directory/PID, active task and bounded recent activity.
+- Put contribution hover lists directly beneath each card; flatten all task descendants into one indented list while keeping notes/details attached to their task. Preserve controls under Actions.
+- Use a headerless prompt with a compact folder/path/launch footer and integrated ⌘Return shortcut; retain inline errors, focus and draft behaviour.
+- Use borderless native agent sections with content-dependent spacing; move PID/registration diagnostics to tooltips instead of crowding the main text.
+- Fix full-width composition using NSMenu's root-view autoresizing contract and natural menu sizing, rather than only resizing child controls.
+- Publish safe tool-name/status activity without capturing tool arguments/results or thinking; retain assistant-preview privacy settings and legacy snapshot fallbacks.
+
 ## 0.6.0
 
 - Embed/publish companion version and source-build identity; reload/start reuses current or newer apps and cooperatively replaces outdated/legacy apps without stopping Pi agents.

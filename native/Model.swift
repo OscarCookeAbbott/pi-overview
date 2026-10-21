@@ -38,6 +38,7 @@ struct InstanceInfo: Codable {
     var updatedAt: Double
     var heartbeatAt: Double
     var contributions: [OverviewContribution]? = nil
+    var lastActivity: String? = nil
 
     var displayStatus: String { status == "Ready" ? "Idle" : status }
 
@@ -221,6 +222,17 @@ func menuContributions(_ info: InstanceInfo) -> [OverviewContribution] {
         return sections.isEmpty ? nil : OverviewContribution(id: "jobs", badge: "", sections: sections)
     }
 }
+func activeTaskTitle(_ info: InstanceInfo) -> String? {
+    func find(_ items: [OverviewItem]) -> String? {
+        for item in items {
+            if item.state == "running" && (item.kind == "task" || item.kind == nil) { return item.title }
+            if let title = find(item.children ?? []) { return title }
+        }
+        return nil
+    }
+    return find((info.contributions ?? []).filter { $0.id == "tasks" }.flatMap { $0.sections }.flatMap { $0.items })
+}
+
 func badgeText(_ info: InstanceInfo) -> String {
     (info.contributions ?? []).filter { $0.id != "jobs" && !$0.badge.isEmpty }.map { "[\(displayText($0.badge, limit: 40))]" }.joined(separator: " ")
 }

@@ -135,24 +135,25 @@ export default function overviewExtension(pi: ExtensionAPI): void {
   });
   pi.on("session_shutdown", cleanup);
   pi.on("session_info_changed", (_event, ctx) => sync({}, ctx));
-  pi.on("session_tree", (_event, ctx) => sync({ lastOutput: "" }, ctx));
+  pi.on("session_tree", (_event, ctx) => sync({ lastOutput: "", lastActivity: "" }, ctx));
   pi.on("agent_start", (_event, ctx) => {
     tools.clear();
     failed = false;
-    sync({ status: "Working", busy: true, lastOutput: "" }, ctx);
+    sync({ status: "Working", busy: true, lastOutput: "", lastActivity: "Agent started" }, ctx);
   });
   pi.on("tool_execution_start", (event, ctx) => {
     tools.set(event.toolCallId, event.toolName);
-    sync({ status: toolStatus(), busy: true }, ctx);
+    sync({ status: toolStatus(), busy: true, lastActivity: preview(`Tool started · ${event.toolName}`) }, ctx);
   });
   pi.on("tool_execution_end", (event, ctx) => {
+    const name = tools.get(event.toolCallId) ?? event.toolName ?? "tool";
     tools.delete(event.toolCallId);
-    sync({ status: toolStatus(), busy: true }, ctx);
+    sync({ status: toolStatus(), busy: true, lastActivity: preview(`Tool ${event.isError ? "failed" : "finished"} · ${name}`) }, ctx);
   });
   pi.on("message_end", (event, ctx) => {
     if (event.message.role !== "assistant" || !config.showOutput) return;
     const text = event.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-    sync({ lastOutput: preview(text) }, ctx);
+    sync({ lastOutput: preview(text), ...(text.trim() ? { lastActivity: preview(`Message · ${text}`) } : {}) }, ctx);
   });
   pi.on("agent_end", (event, ctx) => {
     const assistant = event.messages.findLast((message) => message.role === "assistant");

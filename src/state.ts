@@ -66,12 +66,13 @@ export interface InstanceSnapshot {
   busy: boolean;
   closed: boolean;
   lastOutput: string;
+  lastActivity?: string;
   contributions?: OverviewContribution[];
   updatedAt: number;
   heartbeatAt: number;
 }
 
-type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionId" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "contributions">>;
+type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionId" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "lastActivity" | "contributions">>;
 export type ControlAction = "abort" | "shutdown";
 
 export class InstancePublisher {
@@ -89,7 +90,7 @@ export class InstancePublisher {
     this.commandPath = join(root, "commands", `${id}.json`);
     this.snapshot = {
       version: 1, id, token: randomUUID(), pid: process.pid, cwd: resolve(cwd), projectName: basename(resolve(cwd)) || cwd,
-      status: "Idle", busy: false, closed: false, lastOutput: "", updatedAt: Date.now(), heartbeatAt: Date.now(),
+      status: "Idle", busy: false, closed: false, lastOutput: "", lastActivity: "", updatedAt: Date.now(), heartbeatAt: Date.now(),
       ...(managed ? { logFile: join(root, "logs", `${id}.log`) } : {}),
     };
     this.update({});

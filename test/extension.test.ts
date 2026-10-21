@@ -100,19 +100,23 @@ test("parallel tools and intermediate turns remain busy until agent_settled; onl
   assert.equal(h.read().sessionId, "stable-session-id");
   h.emit("agent_start");
   assert.equal(h.read().status, "Working");
+  assert.equal(h.read().lastActivity, "Agent started");
   h.emit("tool_execution_start", { toolCallId: "one", toolName: "read", args: { secret: "PRIVATE_ARGS" } });
   h.emit("tool_execution_start", { toolCallId: "two", toolName: "bash" });
   assert.equal(h.read().status, "Running 2 tools");
+  assert.equal(h.read().lastActivity, "Tool started · bash");
   h.emit("tool_execution_end", { toolCallId: "two" });
   assert.equal(h.read().status, "Running: read");
-  h.emit("tool_execution_end", { toolCallId: "one" });
+  h.emit("tool_execution_end", { toolCallId: "one", result: { content: [{ type: "text", text: "PRIVATE_RESULT" }] } });
   assert.equal(h.read().status, "Working");
+  assert.equal(h.read().lastActivity, "Tool finished · read");
   h.emit("message_end", { message: { role: "toolResult", content: [{ type: "text", text: "PRIVATE_TOOL" }] } });
   h.emit("message_end", { message: { role: "assistant", content: [{ type: "thinking", thinking: "PRIVATE_THINKING" }, { type: "text", text: "Visible\nanswer" }] } });
   h.emit("agent_end", { messages: [] });
   assert.equal(h.read().busy, true);
   assert.equal(h.read().status, "Finishing");
   assert.equal(h.read().lastOutput, "Visible answer");
+  assert.equal(h.read().lastActivity, "Message · Visible answer");
   assert.ok(!JSON.stringify(h.read()).includes("PRIVATE"));
   h.emit("agent_settled", { aborted: false });
   assert.equal(h.read().status, "Completed");
@@ -135,6 +139,8 @@ test("private mailbox requests abort/shutdown through Pi APIs; hidden previews s
   h.emit("agent_start");
   h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "PRIVATE_OUTPUT" }] } });
   assert.equal(h.read().lastOutput, "");
+  assert.equal(h.read().lastActivity, "Agent started");
+  assert.ok(!JSON.stringify(h.read()).includes("PRIVATE_OUTPUT"));
   atomicJSON(command, { token: snapshot.token, action: "abort", createdAt: Date.now() });
   t.mock.timers.tick(1000);
   assert.equal(h.aborts, 1);
@@ -148,6 +154,21 @@ test("private mailbox requests abort/shutdown through Pi APIs; hidden previews s
   assert.equal(h.shutdowns, 1);
   h.emit("session_shutdown");
   assert.equal(h.read().closed, true);
+});
+
+test("recent tool activity stays bounded and excludes arguments/results; session navigation clears it", macOnly, async (t) => {
+  const h = harness(t);
+  await h.emit("session_start");
+  h.emit("tool_execution_start", { toolCallId: "failed", toolName: "read", args: { text: "PRIVATE_ARGS" } });
+  h.emit("tool_execution_end", { toolCallId: "failed", isError: true, result: { text: "PRIVATE_RESULT" } });
+  assert.equal(h.read().lastActivity, "Tool failed · read");
+  h.emit("tool_execution_start", { toolCallId: "long", toolName: "x".repeat(500) + "\u001b[2A" });
+  assert.ok(h.read().lastActivity!.length <= 400);
+  assert.ok(!h.read().lastActivity!.includes("\u001b"));
+  assert.ok(!JSON.stringify(h.read()).includes("PRIVATE"));
+  h.emit("session_tree");
+  assert.equal(h.read().lastActivity, "");
+  assert.equal(h.read().lastOutput, "");
 });
 
 test("overview contributions survive startup ordering, update/remove safely, and use the configured launch directory", macOnly, async (t) => {
