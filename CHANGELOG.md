@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- Widen gaps between menubar icon-count groups and order them running, Idle, failure, success; retain all existing symbols and counting semantics.
+- Restore native prompt cut/copy/paste/select-all and undo/redo shortcuts without requiring a standard Edit menu.
+- List owned notes directly beneath tasks and directly in task details, without an intermediate Notes hover; preserve retraction/full-detail/copy access.
+- Add per-headless-session drafts and follow-up inputs with authenticated, expiring, session-bound dispatch receipts; keep unconfirmed drafts and never auto-replay. Continue finished sessions from the exact saved file with writer guards and normal trust.
+
 ## 0.7.0
 
 - Replace per-agent hover wrappers with compact multiline main-menu cards showing status, directory/PID, active task and bounded recent activity.

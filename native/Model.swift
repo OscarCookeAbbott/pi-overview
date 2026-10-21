@@ -39,6 +39,8 @@ struct InstanceInfo: Codable {
     var heartbeatAt: Double
     var contributions: [OverviewContribution]? = nil
     var lastActivity: String? = nil
+    var headless: Bool? = nil
+    var acceptsInput: Bool? = nil
 
     var displayStatus: String { status == "Ready" ? "Idle" : status }
 
@@ -206,10 +208,10 @@ func menubarTitle(_ instances: [InstanceInfo], phase: Int = 0) -> String {
     let idle = live.count - running - completed - failed
     var counts: [String] = []
     if running > 0 { counts.append("\(itemSymbol("running", phase: phase)) \(running)") }
-    if completed > 0 { counts.append("✓ \(completed)") }
-    if failed > 0 { counts.append("✕ \(failed)") }
     if idle > 0 { counts.append("\(itemSymbol("pending")) \(idle)") }
-    return "π  " + counts.joined(separator: " ")
+    if failed > 0 { counts.append("✕ \(failed)") }
+    if completed > 0 { counts.append("✓ \(completed)") }
+    return "π  " + counts.joined(separator: "   ")
 }
 func menuContributions(_ info: InstanceInfo) -> [OverviewContribution] {
     (info.contributions ?? []).compactMap { contribution in
@@ -269,6 +271,55 @@ func canResume(_ info: InstanceInfo, among instances: [InstanceInfo]) -> Bool {
     return !instances.contains { other in
         other.id != info.id && other.sessionFile == session && !other.closed && (other.isLive() || other.processAlive || other.pid == 0)
     }
+}
+
+func sessionInputKey(_ info: InstanceInfo) -> String {
+    info.sessionFile ?? sessionIdentity(info) ?? info.id
+}
+
+func continuationSession(_ previous: InstanceInfo, root: URL) throws -> String {
+    guard let current = InstanceInfo.read(root.appendingPathComponent("records/\(previous.id).json")),
+          current.token == previous.token, current.sessionFile == previous.sessionFile, current.sessionId == previous.sessionId,
+          let saved = current.sessionFile, canResume(current, among: loadInstances(root: root)) else {
+        throw OverviewError.message("Session changed or is still active. Draft kept; no concurrent writer was started.")
+    }
+    return saved
+}
+
+struct SessionInputRequest: Codable {
+    let id: String
+    let token: String
+    let sessionId: String?
+    let sessionFile: String?
+    let message: String
+    let createdAt: Double
+}
+
+func inputUnavailable(_ info: InstanceInfo, among instances: [InstanceInfo]) -> String? {
+    if info.isLive() && info.pid > 0 && info.acceptsInput == true { return nil }
+    if canResume(info, among: instances) { return nil }
+    return "Session unavailable, still starting, or active in another instance. Reload older live Pi versions to enable follow-ups."
+}
+
+func requestInput(_ info: InstanceInfo, message: String, root: URL) throws -> SessionInputRequest {
+    guard let current = InstanceInfo.read(root.appendingPathComponent("records/\(info.id).json")),
+          current.token == info.token, current.sessionId == info.sessionId, current.sessionFile == info.sessionFile,
+          current.isLive(), current.pid > 0, current.headless == true, current.acceptsInput == true,
+          !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, message.utf8.count <= 65536 else {
+        throw OverviewError.message("This headless session changed or stopped. Your draft was kept; no new session was started.")
+    }
+    let request = SessionInputRequest(id: UUID().uuidString.lowercased(), token: info.token, sessionId: info.sessionId,
+                                      sessionFile: info.sessionFile, message: message, createdAt: nowMillis())
+    try writeJSON(request, to: root.appendingPathComponent("inputs/\(info.id).json"))
+    return request
+}
+
+func inputReceipt(_ request: SessionInputRequest, instanceId: String, root: URL) -> String? {
+    struct Receipt: Decodable { let id: String; let token: String; let status: String }
+    guard let data = try? Data(contentsOf: root.appendingPathComponent("inputs/\(instanceId).result.json")), data.count <= 4096,
+          let receipt = try? JSONDecoder().decode(Receipt.self, from: data), receipt.id == request.id, receipt.token == request.token,
+          receipt.status == "submitted" || receipt.status == "rejected" else { return nil }
+    return receipt.status
 }
 
 struct ControlRequest: Encodable {

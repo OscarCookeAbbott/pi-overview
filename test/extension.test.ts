@@ -17,6 +17,7 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
   const globals = globalThis as Record<symbol, unknown>;
   const previousService = globals[PI_OVERVIEW_KEY];
   const notices: string[] = [];
+  const inputs: Array<{ message: string; options: unknown }> = [];
   let command!: { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
   let aborts = 0, shutdowns = 0, idle = true;
   const ctx = {
@@ -30,6 +31,7 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
     on: (name: string, handler: (event: any, ctx: ExtensionContext) => any) => handlers.set(name, handler),
     getSettings: () => ({ overview }),
     events,
+    sendUserMessage: (message: string, options: unknown) => inputs.push({ message, options }),
     registerCommand: (name: string, value: typeof command) => { assert.equal(name, "overview"); command = value; },
   } as unknown as ExtensionAPI);
   const emit = (name: string, event: unknown = {}) => handlers.get(name)?.(event, ctx);
@@ -43,7 +45,7 @@ function harness(t: TestContext, overview: Record<string, unknown> = { autoStart
     rmSync(dir, { recursive: true, force: true });
   });
   return {
-    root, ctx, notices, emit, events,
+    root, ctx, notices, emit, events, inputs,
     service: globals[PI_OVERVIEW_KEY] as OverviewService,
     command: (args: string) => command.handler(args, ctx as ExtensionCommandContext),
     setIdle(value: boolean) { idle = value; },
@@ -127,6 +129,24 @@ test("parallel tools and intermediate turns remain busy until agent_settled; onl
   h.emit("session_shutdown");
   assert.equal(h.read().closed, true);
   assert.equal(h.read().status, "Completed");
+});
+
+test("headless follow-ups use Pi's follow-up API without exposing input in snapshots", macOnly, async (t) => {
+  const h = harness(t);
+  Reflect.set(h.ctx, "mode", "json");
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  await h.emit("session_start");
+  const snapshot = h.read();
+  assert.equal(snapshot.headless, true);
+  assert.equal(snapshot.acceptsInput, true);
+  const request = { id: "77777777-7777-4777-8777-777777777777", token: snapshot.token, sessionId: snapshot.sessionId,
+    sessionFile: snapshot.sessionFile, message: "PRIVATE_FOLLOW_UP\n@literal --approve", createdAt: Date.now() };
+  atomicJSON(join(h.root, "inputs", `${snapshot.id}.json`), request);
+  t.mock.timers.tick(1000);
+  assert.deepEqual(h.inputs, [{ message: request.message, options: { deliverAs: "followUp", expandPromptTemplates: false } }]);
+  assert.ok(!JSON.stringify(h.read()).includes("PRIVATE_FOLLOW_UP"));
+  assert.equal(h.aborts, 0);
+  assert.equal(h.shutdowns, 0);
 });
 
 test("private mailbox requests abort/shutdown through Pi APIs; hidden previews stay hidden", macOnly, async (t) => {

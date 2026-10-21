@@ -94,17 +94,57 @@ struct NativeTests {
         complete.busy = false
         complete.status = "Completed"
         expect(menubarTitle([]) == "π", "no separator without counts")
-        expect(menubarTitle([info, complete]) == "π  ▶ 1 ✓ 1", "Pi and state counts are separated by exactly two spaces")
+        expect(menubarTitle([info, complete]) == "π  ▶ 1   ✓ 1", "Pi keeps two spaces; each icon-count group has a wider three-space gap")
         expect(agentSymbol(complete) == "✓" && itemSymbol("failed") == "✕", "popup state symbols")
         expect(itemSymbol("running", phase: 1) == "▶", "running uses an unenclosed play triangle")
         var idle = complete
         idle.id = UUID().uuidString
         idle.status = "Idle"
         expect(agentState(idle) == "pending" && agentSymbol(idle) == "‖", "idle sessions use plain pause bars, not a completion checkmark")
-        expect(menubarTitle([info, complete, idle]) == "π  ▶ 1 ✓ 1 ‖ 1", "idle count uses the shared pause fallback")
+        expect(menubarTitle([info, complete, idle]) == "π  ▶ 1   ‖ 1   ✓ 1", "idle follows running with unchanged pause fallback")
+        var failed = complete
+        failed.id = UUID().uuidString
+        failed.status = "Error"
+        expect(menubarTitle([complete, failed, info, idle]) == "π  ▶ 1   ‖ 1   ✕ 1   ✓ 1", "groups are running, idle, failure, success regardless of registration order")
         idle.status = "Ready"
         expect(idle.displayStatus == "Idle" && agentSymbol(idle) == "‖", "legacy Ready records are presented as Idle")
         expect(complete.displayStatus == "Completed", "completion labels remain distinct from idle")
+    }
+
+    static func testHeadlessInput(root: URL, template: InstanceInfo) throws {
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("inputs"), withIntermediateDirectories: true)
+        var info = template
+        info.headless = true
+        info.acceptsInput = true
+        let startingKey = sessionInputKey(info)
+        var registered = info
+        registered.sessionId = UUID().uuidString.lowercased()
+        expect(startingKey == sessionInputKey(registered), "a headless draft survives registration discovering its session ID")
+        let file = root.appendingPathComponent("records/\(info.id).json")
+        try writeJSON(info, to: file)
+        expect(inputUnavailable(info, among: [info]) == nil, "live headless runtime accepts a follow-up")
+        let request = try requestInput(info, message: "Follow up\n@literal --approve 🥧", root: root)
+        let path = root.appendingPathComponent("inputs/\(info.id).json")
+        let decoded = try JSONDecoder().decode(SessionInputRequest.self, from: Data(contentsOf: path))
+        expect(decoded.token == info.token && decoded.sessionFile == info.sessionFile && decoded.message == request.message, "input is token/session-bound raw JSON, not shell or prompt flags")
+        var stale = info
+        stale.token = UUID().uuidString
+        do { _ = try requestInput(stale, message: "wrong target", root: root); expect(false, "stale input target accepted") } catch {}
+        try writeJSON(["id": request.id, "token": request.token, "status": "submitted"], to: root.appendingPathComponent("inputs/\(info.id).result.json"))
+        expect(inputReceipt(request, instanceId: info.id, root: root) == "submitted", "receipt correlates exact request and token")
+        info.closed = true
+        info.busy = false
+        info.pid = 0
+        try writeJSON(info, to: file)
+        let continued = try continuationSession(info, root: root)
+        expect(continued == info.sessionFile, "finished headless session continues its exact saved file")
+        var writer = template
+        writer.id = UUID().uuidString.lowercased()
+        let writerFile = root.appendingPathComponent("records/\(writer.id).json")
+        try writeJSON(writer, to: writerFile)
+        do { _ = try continuationSession(info, root: root); expect(false, "active competing writer accepted") } catch {}
+        try FileManager.default.removeItem(at: writerFile)
+        try writeJSON(template, to: file)
     }
 
     static func main() throws {
@@ -124,6 +164,7 @@ struct NativeTests {
         expect(InstanceInfo.read(file)?.id == id, "snapshot round-trip")
         expect(info.isLive(), "fresh live process")
         testStateSymbols(info)
+        try testHeadlessInput(root: root, template: info)
         info.contributions = [
             OverviewContribution(id: "tasks", badge: "3/6 tasks", sections: [OverviewSection(title: "Tasks", items: [
                 OverviewItem(title: "[ab] Build", state: "running", detail: "Run tests")

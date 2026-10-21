@@ -35,7 +35,7 @@ export function preview(text: string): string {
 }
 
 export function ensureDirectories(root: string): void {
-  for (const path of [root, ...["records", "commands", "logs", "sessions", "bin"].map((name) => join(root, name))]) {
+  for (const path of [root, ...["records", "commands", "inputs", "logs", "sessions", "bin"].map((name) => join(root, name))]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
     chmodSync(path, 0o700);
   }
@@ -67,12 +67,14 @@ export interface InstanceSnapshot {
   closed: boolean;
   lastOutput: string;
   lastActivity?: string;
+  headless?: boolean;
+  acceptsInput?: boolean;
   contributions?: OverviewContribution[];
   updatedAt: number;
   heartbeatAt: number;
 }
 
-type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionId" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "lastActivity" | "contributions">>;
+type Update = Partial<Pick<InstanceSnapshot, "cwd" | "projectName" | "sessionId" | "sessionFile" | "sessionName" | "status" | "busy" | "lastOutput" | "lastActivity" | "contributions" | "headless" | "acceptsInput">>;
 export type ControlAction = "abort" | "shutdown";
 
 export class InstancePublisher {
@@ -80,6 +82,7 @@ export class InstancePublisher {
   readonly path: string;
   readonly commandPath: string;
   snapshot: InstanceSnapshot;
+  private readonly inputResults = new Map<string, string>();
 
   constructor(root: string, cwd: string, launchId?: string) {
     this.root = root;
@@ -134,6 +137,38 @@ export class InstancePublisher {
     }
   }
 
+  consumeInput(send: (message: string) => void): void {
+    if (this.snapshot.closed || !this.snapshot.headless || !this.snapshot.acceptsInput) return;
+    const path = join(this.root, "inputs", `${this.snapshot.id}.json`);
+    const claimed = `${path}.${randomUUID()}.processing`;
+    try { renameSync(path, claimed); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    try {
+      if (statSync(claimed).size > 400000) return;
+      const request: unknown = JSON.parse(readFileSync(claimed, "utf8"));
+      if (!request || typeof request !== "object") return;
+      const { id, token, sessionId, sessionFile, createdAt, message } = request as Record<string, unknown>;
+      if (token !== this.snapshot.token || typeof id !== "string" || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) return;
+      const receipt = join(this.root, "inputs", `${this.snapshot.id}.result.json`);
+      const previous = this.inputResults.get(id);
+      if (previous) { atomicJSON(receipt, { id, token, status: previous }); return; }
+      const age = typeof createdAt === "number" ? Date.now() - createdAt : NaN;
+      let status = "rejected";
+      if (sessionId === this.snapshot.sessionId && sessionFile === this.snapshot.sessionFile && Number.isFinite(age) && age >= 0 && age <= 10000 &&
+          typeof message === "string" && message.trim() && Buffer.byteLength(message) <= 65536) {
+        this.inputResults.set(id, status);
+        try { send(message); status = "submitted"; } catch { /* Receipt reports a synchronous dispatch failure without exposing prompt data. */ }
+        this.inputResults.set(id, status);
+      }
+      atomicJSON(receipt, { id, token, status });
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    } finally { rmSync(claimed, { force: true }); }
+  }
+
   close(): void {
     if (this.snapshot.closed) return;
     let status = this.snapshot.status;
@@ -142,5 +177,6 @@ export class InstancePublisher {
     this.snapshot = { ...this.snapshot, status, busy: false, closed: true, updatedAt: Date.now(), heartbeatAt: Date.now() };
     atomicJSON(this.path, this.snapshot);
     rmSync(this.commandPath, { force: true });
+    rmSync(join(this.root, "inputs", `${this.snapshot.id}.json`), { force: true });
   }
 }

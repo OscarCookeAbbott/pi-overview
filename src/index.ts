@@ -111,7 +111,7 @@ export default function overviewExtension(pi: ExtensionAPI): void {
     if (!config.enabled) return;
     try {
       publisher = new InstancePublisher(root, ctx.cwd, launchId);
-      sync({}, ctx);
+      sync({ headless: ctx.mode !== "tui", acceptsInput: ctx.mode !== "tui" }, ctx);
       const current = publisher;
       const onExit = () => { try { current.close(); } catch { /* Best-effort exit snapshot. */ } };
       process.on("exit", onExit);
@@ -120,7 +120,8 @@ export default function overviewExtension(pi: ExtensionAPI): void {
         try {
           const action = current.consumeCommand();
           if (action === "abort" && context && !context.isIdle()) { sync({ status: "Aborting" }); context.abort(); }
-          if (action === "shutdown") { sync({ status: "Stopping" }); context?.shutdown(); }
+          if (action === "shutdown") { sync({ status: "Stopping", acceptsInput: false }); context?.shutdown(); }
+          current.consumeInput((message) => pi.sendUserMessage(message, { deliverAs: "followUp", expandPromptTemplates: false }));
           current.heartbeat();
         } catch (error) { warn(error); }
       }, 1000);

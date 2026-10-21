@@ -3,8 +3,53 @@ import Cocoa
 final class AgentPromptEditor: NSTextView {
     var onSubmit: (() -> Void)?
     var onCancel: (() -> Void)?
+    var clipboard = NSPasteboard.general
+
+    override func copy(_ sender: Any?) {
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        clipboard.clearContents()
+        clipboard.setString((string as NSString).substring(with: range), forType: .string)
+    }
+
+    override func cut(_ sender: Any?) {
+        guard isEditable, selectedRange().length > 0 else { return }
+        copy(sender)
+        delete(sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard isEditable, let text = clipboard.string(forType: .string) else { return }
+        insertText(text, replacementRange: selectedRange())
+    }
+
+    private func editShortcut(_ event: NSEvent) -> Bool {
+        guard window?.firstResponder === self else { return false }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard flags == .command || flags == [.command, .shift] else { return false }
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if flags.contains(.shift) && key != "z" { return false }
+        switch key {
+        case "a": selectAll(nil)
+        case "c": copy(nil)
+        case "x": cut(nil)
+        case "v": paste(nil)
+        case "z": if flags.contains(.shift) { undoManager?.redo() } else { undoManager?.undo() }
+        default: return false
+        }
+        return true
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self && event.keyCode == 36 && event.modifierFlags.contains(.command) {
+            onSubmit?()
+            return true
+        }
+        return editShortcut(event) || super.performKeyEquivalent(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
+        if editShortcut(event) { return }
         if event.keyCode == 36 && event.modifierFlags.contains(.command) { onSubmit?(); return }
         if event.keyCode == 53 { onCancel?(); return }
         super.keyDown(with: event)
@@ -40,7 +85,8 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         if let current = current { panel.directoryURL = URL(fileURLWithPath: current) }
         return panel.runModal() == .OK ? panel.url?.path : nil
     }
-    private let onSubmit: (String, String) throws -> Void
+    private let onSubmit: (String, String, @escaping (Result<Void, Error>) -> Void) -> Void
+    var focusesOnOpen = true
     private let scroll = NSScrollView()
     private var defaultDirectory: String?
     private var selectedDirectory: String?
@@ -55,7 +101,11 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         set { editor.string = newValue; submissionError = nil; updateState() }
     }
 
-    init(onSubmit: @escaping (String, String) throws -> Void) {
+    convenience init(onSubmit: @escaping (String, String) throws -> Void) {
+        self.init { prompt, directory, done in done(Result { try onSubmit(prompt, directory) }) }
+    }
+
+    init(onSubmit: @escaping (String, String, @escaping (Result<Void, Error>) -> Void) -> Void) {
         self.onSubmit = onSubmit
         super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 104))
         identifier = NSUserInterfaceItemIdentifier("overview.agent-composer")
@@ -153,7 +203,7 @@ final class AgentComposer: NSView, NSTextViewDelegate {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let window = window else { return }
+        guard focusesOnOpen, let window = window else { return }
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self = self, let window = window, self.window === window, window.isVisible else { return }
             window.makeFirstResponder(self.editor)
@@ -191,6 +241,7 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         directoryLabel.isHidden = error != nil
         startButton.isEnabled = !submitting && configurationError == nil && validDirectory && !value.isEmpty && !tooLong
         directoryButton.isEnabled = !submitting
+        editor.isEditable = !submitting
         editor.needsDisplay = true
     }
 
@@ -199,13 +250,17 @@ final class AgentComposer: NSView, NSTextViewDelegate {
         guard startButton.isEnabled, let directory = directory else { return }
         submitting = true
         updateState()
-        do {
-            try onSubmit(prompt.trimmingCharacters(in: .whitespacesAndNewlines), directory)
-            editor.string = ""
-            selectedDirectory = nil
-            submissionError = nil
-        } catch { submissionError = error.localizedDescription }
-        submitting = false
-        updateState()
+        onSubmit(prompt.trimmingCharacters(in: .whitespacesAndNewlines), directory) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success:
+                self.editor.string = ""
+                self.selectedDirectory = nil
+                self.submissionError = nil
+            case .failure(let error): self.submissionError = error.localizedDescription
+            }
+            self.submitting = false
+            self.updateState()
+        }
     }
 }

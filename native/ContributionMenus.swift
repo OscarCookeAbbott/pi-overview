@@ -64,13 +64,18 @@ final class ContributionMenus: NSObject, NSMenuDelegate {
         deferredMenu { [weak self] menu in
             guard let self = self else { return }
             func append(_ value: OverviewItem, depth: Int) {
-                let children = value.children ?? []
+                let children = self.inlineNotes(value.children ?? [])
                 let subtasks = children.filter { $0.kind == "task" || $0.kind == nil || ($0.kind == "group" && $0.title == "Subtasks") }
                 var detail = value
                 detail.children = children.filter { $0.kind != "task" && $0.kind != nil && !($0.kind == "group" && $0.title == "Subtasks") }
                 let row = self.makeItem(detail, phase: phase)
                 row.indentationLevel = depth
                 menu.addItem(row)
+                for note in children where note.kind == "note" {
+                    let noteRow = self.makeItem(note, phase: phase)
+                    noteRow.indentationLevel = depth + 1
+                    menu.addItem(noteRow)
+                }
                 for child in subtasks {
                     if child.kind == "group" {
                         for task in child.children ?? [] { append(task, depth: depth + 1) }
@@ -100,8 +105,14 @@ final class ContributionMenus: NSObject, NSMenuDelegate {
         return item
     }
 
+    private func inlineNotes(_ items: [OverviewItem]) -> [OverviewItem] {
+        items.flatMap { item in
+            item.kind == "group" && item.title == "Notes" ? item.children ?? [] : [item]
+        }
+    }
+
     private func makeItem(_ value: OverviewItem, phase: Int) -> NSMenuItem {
-        let children = value.children ?? []
+        let children = value.kind == "task" ? inlineNotes(value.children ?? []) : value.children ?? []
         let title = displayText(value.title, limit: 80) + (value.kind == "group" ? " (\(children.count))" : "")
         let row = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         let symbol: String

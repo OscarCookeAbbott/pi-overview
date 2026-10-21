@@ -37,13 +37,10 @@ struct NativeMenuTests {
         expect(card.titleLabel.stringValue == "Task" && card.subtitleLabel.stringValue == "Active · 1 note", "card has distinct title/status typography")
         expect(card.textView.string == detail && !card.textView.isEditable && card.textView.isSelectable, "complete details are selectable and read-only")
         expect(card.frame.height <= 268 && card.scrollView.hasVerticalScroller, "long details scroll within a bounded-height card")
-        guard let notesMenu = submenu.items.first(where: { $0.title.contains("Notes (1)") })?.submenu else {
-            expect(false, "notes need their own ownership group"); return
-        }
-        renderer.menuWillOpen(notesMenu)
+        expect(!submenu.items.contains { $0.title.hasPrefix("Notes (") }, "task notes must not require another Notes hover")
         expect(submenu.items.contains { $0.title == "Copy details" && $0.isEnabled }, "details can be copied")
-        guard let note = notesMenu.items.first(where: { $0.title.contains("<ab> Decision") }), let noteMenu = note.submenu else {
-            expect(false, "notes must be nested under their task"); return
+        guard let note = submenu.items.first(where: { $0.title.contains("<ab> Decision") }), let noteMenu = note.submenu else {
+            expect(false, "notes must be directly listed on their task"); return
         }
         expect(note.isEnabled, "notes are independently hoverable")
         renderer.menuWillOpen(noteMenu)
@@ -57,6 +54,8 @@ struct NativeMenuTests {
         testAgentHoverRefresh()
         testComposerLayout()
         try testComposer()
+        testClipboardShortcuts()
+        testAsyncComposer()
         print("Native menu tests passed: structured cards, owned notes, scrolling lists and inline composer controls.")
     }
 
@@ -89,14 +88,17 @@ struct NativeMenuTests {
         var idle = complete
         idle.id = UUID().uuidString
         idle.status = "Idle"
-        let title = menubarAttributedTitle([running, complete, idle])
-        expect(title.string == "π  \u{fffc} 1 \u{fffc} 1 \u{fffc} 1", "native count icons retain the exact Pi separator and counts")
+        var failed = complete
+        failed.id = UUID().uuidString
+        failed.status = "Error"
+        let title = menubarAttributedTitle([running, complete, idle, failed])
+        expect(title.string == "π  \u{fffc} 1   \u{fffc} 1   \u{fffc} 1   \u{fffc} 1", "native groups keep tight icon-count association and wider group separation")
         var images: [NSImage] = []
         title.enumerateAttribute(.attachment, in: NSRange(location: 0, length: title.length)) { value, _, _ in
             if let image = (value as? NSTextAttachment)?.image { images.append(image) }
         }
-        expect(images.count == 3, "running, completed and idle counts have native icons")
-        for (index, pair) in [("running", "play.fill"), ("complete", "checkmark"), ("pending", "pause")].enumerated() {
+        expect(images.count == 4, "all four counts retain native icons")
+        for (index, pair) in [("running", "play.fill"), ("pending", "pause"), ("failed", "xmark"), ("complete", "checkmark")].enumerated() {
             let (state, symbol) = pair
             let reference = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!
             reference.size = NSSize(width: NSFont.menuBarFont(ofSize: 0).pointSize, height: NSFont.menuBarFont(ofSize: 0).pointSize)
@@ -158,12 +160,12 @@ struct NativeMenuTests {
         let tasks = rows[1].submenu!, jobs = rows[2].submenu!
         renderer.menuWillOpen(tasks)
         renderer.menuWillOpen(jobs)
-        expect(tasks.items.map { $0.title } == ["[pa] Overhaul", "[ab] Build compact cards"], "one task hover exposes all descendants")
-        expect(tasks.items[1].indentationLevel == 1, "flattened tasks retain their hierarchy visually")
+        expect(tasks.items.map { $0.title } == ["[pa] Overhaul", "<cd> Decision", "[ab] Build compact cards"], "one task hover exposes descendants and owned notes inline")
+        expect(tasks.items[1].indentationLevel == 1 && tasks.items[2].indentationLevel == 1, "notes and subtasks retain their parent hierarchy visually")
         expect(jobs.items.count == 50 && jobs.items.last?.title == "[jb] Job 49", "one job hover exposes every job without caps")
         let details = tasks.items[0].submenu!
         renderer.menuWillOpen(details)
-        expect(details.items.contains { $0.title == "Notes (1)" }, "owned notes/details remain reachable")
+        expect(details.items.contains { $0.title == "<cd> Decision" }, "owned notes/details remain directly reachable")
         expect(!details.items.contains { $0.title.hasPrefix("Subtasks") }, "task navigation does not reintroduce redundant nesting")
         let activeHeight = card.frame.height
         info.lastActivity = "Tool finished · read"
@@ -243,6 +245,54 @@ struct NativeMenuTests {
         expect(composer.subviews.filter { !$0.isHidden }.allSatisfy { composer.bounds.contains($0.frame) }, "visible controls fit inside the compact composer")
         composer.configure(directory: FileManager.default.temporaryDirectory.path)
         expect(composer.errorLabel.isHidden && !composer.directoryLabel.isHidden, "clearing errors restores the path")
+    }
+
+    static func testClipboardShortcuts() {
+        let editor = AgentPromptEditor(frame: NSRect(x: 0, y: 0, width: 300, height: 80))
+        editor.isRichText = false
+        editor.allowsUndo = true
+        editor.clipboard = NSPasteboard.withUniqueName()
+        let window = NSWindow(contentRect: editor.bounds, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor
+        defer { window.close() }
+        expect(window.makeFirstResponder(editor), "clipboard editor receives focus")
+        func key(_ value: String, shift: Bool = false) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.command, .shift] : [.command], timestamp: 0, windowNumber: 0,
+                             context: nil, characters: value, charactersIgnoringModifiers: value, isARepeat: false, keyCode: 0)!
+        }
+        let text = "first\nsecond 🥧"
+        editor.clipboard.setString(text, forType: .string)
+        expect(editor.performKeyEquivalent(with: key("v")), "command-paste is handled without an Edit menu")
+        expect(editor.string == text, "paste inserts full plain multiline Unicode text")
+        expect(editor.performKeyEquivalent(with: key("a")), "command-select-all is handled")
+        expect(editor.selectedRange().length == (text as NSString).length, "selection covers UTF-16 content")
+        editor.clipboard.clearContents()
+        expect(editor.performKeyEquivalent(with: key("c")), "command-copy is handled")
+        expect(editor.clipboard.string(forType: .string) == text, "copy preserves selection without touching the user's general clipboard")
+        expect(editor.performKeyEquivalent(with: key("x")) && editor.string.isEmpty, "command-cut removes the selection")
+        editor.keyDown(with: key("v"))
+        expect(editor.string == text, "keyDown also routes clipboard editing when menu tracking bypasses equivalents")
+        editor.undoManager?.removeAllActions()
+        editor.undoManager?.beginUndoGrouping()
+        editor.insertText("!", replacementRange: NSRange(location: (editor.string as NSString).length, length: 0))
+        editor.undoManager?.endUndoGrouping()
+        expect(editor.performKeyEquivalent(with: key("z")) && editor.string == text, "command-undo remains available")
+        expect(editor.performKeyEquivalent(with: key("z", shift: true)) && editor.string == text + "!", "command-shift-Z redoes editing")
+    }
+
+    static func testAsyncComposer() {
+        var finish: ((Result<Void, Error>) -> Void)?
+        let composer = AgentComposer { _, _, done in finish = done }
+        composer.configure(directory: FileManager.default.temporaryDirectory.path)
+        composer.prompt = "Keep pending draft"
+        composer.submit(nil)
+        expect(composer.prompt == "Keep pending draft" && !composer.startButton.isEnabled && !composer.editor.isEditable, "pending delivery retains and locks the draft")
+        finish?(.failure(OverviewError.message("Delivery unconfirmed")))
+        expect(composer.prompt == "Keep pending draft" && composer.startButton.isEnabled && composer.editor.isEditable, "unconfirmed delivery preserves a retryable draft")
+        composer.submit(nil)
+        finish?(.success(()))
+        expect(composer.prompt.isEmpty && !composer.startButton.isEnabled, "only acknowledged submission clears the draft")
     }
 
     static func testComposer() throws {

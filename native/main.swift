@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var timer: Timer?
     var actions: [MenuAction] = []
     var agentCards: [String: AgentCard] = [:]
+    var sessionComposers: [String: AgentComposer] = [:]
+    var sessionTargets: [String: InstanceInfo] = [:]
     var menuOpen = false
     var children: [String: (Process, FileHandle)] = [:]
     var phase = 0
@@ -68,7 +70,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let sessions = deduplicateSessions(instances)
         let live = sessions.filter { $0.isLive() }
         if menuOpen {
-            for info in sessions { agentCards[info.id]?.configure(info) }
+            for info in sessions {
+                agentCards[info.id]?.configure(info)
+                let key = sessionInputKey(info)
+                if let composer = sessionComposers[key] {
+                    sessionTargets[key] = info
+                    composer.configure(directory: info.cwd, error: inputUnavailable(info, among: instances))
+                }
+            }
         }
         phase = (phase + 1) % 4
         if let button = item.button {
@@ -112,7 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return InstanceInfo.read(root.appendingPathComponent("records/\(info.id).json"))
             })
             agentCards[info.id] = rows.first?.view as? AgentCard
-            for row in rows { menu.addItem(row) }
+            for (rowIndex, row) in rows.enumerated() {
+                menu.addItem(row)
+                if rowIndex == 0, let input = makeSessionComposer(info, registrations: registrations) { menu.addItem(input) }
+            }
         }
         menu.addItem(.separator())
         menu.addItem(entry("Clear Finished Entries") { [weak self] in
@@ -128,6 +140,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) { menuOpen = false }
+
+    func makeSessionComposer(_ info: InstanceInfo, registrations: [InstanceInfo]) -> NSMenuItem? {
+        guard info.headless ?? (info.logFile != nil) else { return nil }
+        let key = sessionInputKey(info)
+        sessionTargets[key] = info
+        let composer = sessionComposers[key] ?? AgentComposer { [weak self] prompt, _, done in
+            guard let self = self, let target = self.sessionTargets[key] else {
+                done(.failure(OverviewError.message("Session unavailable. Draft kept."))); return
+            }
+            self.sendSessionInput(target, prompt: prompt, done: done)
+        }
+        sessionComposers[key] = composer
+        composer.focusesOnOpen = false
+        composer.directoryButton.isHidden = true
+        composer.editor.setAccessibilityLabel("Follow-up for \(displayText(info.sessionName ?? info.projectName))")
+        composer.editor.toolTip = "⌘Return submits to this session. Running agents receive a follow-up; finished sessions continue from their exact saved file."
+        composer.startButton.setAccessibilityLabel("Send follow-up")
+        composer.startButton.toolTip = "Send follow-up (⌘Return)"
+        composer.configure(directory: info.cwd, error: inputUnavailable(info, among: registrations))
+        composer.setFrameSize(NSSize(width: overviewMenuWidth, height: composer.frame.height))
+        let row = NSMenuItem(title: "Session input", action: nil, keyEquivalent: "")
+        row.view = composer
+        return row
+    }
+
+    func sendSessionInput(_ info: InstanceInfo, prompt: String, done: @escaping (Result<Void, Error>) -> Void) {
+        do {
+            if !info.isLive() {
+                let configured = try launcher()
+                let config = Launcher(node: configured.node, cli: configured.cli, extensionPath: configured.extensionPath, cwd: info.cwd)
+                try launch(config, prompt: prompt, resuming: info)
+                done(.success(()))
+                return
+            }
+            let request = try requestInput(info, message: prompt, root: root)
+            let deadline = Date().addingTimeInterval(12)
+            let poll = Timer(timeInterval: 0.25, repeats: true) { [weak self] timer in
+                guard let self = self else { timer.invalidate(); return }
+                if let status = inputReceipt(request, instanceId: info.id, root: self.root) {
+                    timer.invalidate()
+                    done(status == "submitted" ? .success(()) : .failure(OverviewError.message("Pi rejected this follow-up. Draft kept.")))
+                } else if Date() >= deadline {
+                    timer.invalidate()
+                    done(.failure(OverviewError.message("Delivery unconfirmed. Draft kept; check the session/log before resending.")))
+                }
+            }
+            RunLoop.main.add(poll, forMode: .common)
+        } catch { done(.failure(error)) }
+    }
 
     func makeAgentActions(_ info: InstanceInfo, registrations: [InstanceInfo]) -> NSMenu {
         let menu = NSMenu()
@@ -190,16 +251,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try requestControl(info, action: action, root: root) } catch { showError(error) }
     }
 
-    func launch(_ config: Launcher, prompt: String) throws {
+    func launch(_ config: Launcher, prompt: String, resuming: InstanceInfo? = nil) throws {
         let cwd = try config.newAgentDirectory().path
         let id = UUID().uuidString.lowercased()
-        let session = root.appendingPathComponent("sessions/\(id).jsonl").path
+        let session: String
+        if let previous = resuming {
+            session = try continuationSession(previous, root: root)
+        } else { session = root.appendingPathComponent("sessions/\(id).jsonl").path }
         let log = root.appendingPathComponent("logs/\(id).log")
         let record = root.appendingPathComponent("records/\(id).json")
         var info = InstanceInfo(id: id, token: UUID().uuidString.lowercased(), pid: 0, cwd: cwd,
-                                projectName: URL(fileURLWithPath: cwd).lastPathComponent, sessionFile: session,
+                                projectName: URL(fileURLWithPath: cwd).lastPathComponent, sessionId: resuming?.sessionId, sessionFile: session,
                                 logFile: log.path, status: "Starting", busy: true, closed: false,
-                                lastOutput: "", updatedAt: nowMillis(), heartbeatAt: nowMillis())
+                                lastOutput: "", updatedAt: nowMillis(), heartbeatAt: nowMillis(), headless: true)
         try writeJSON(info, to: record)
         FileManager.default.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600])
         let handle = try FileHandle(forWritingTo: log)

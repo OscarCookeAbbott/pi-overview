@@ -11,6 +11,32 @@ function setup(t: TestContext) {
   return new InstancePublisher(root, "/tmp/Project 'quoted' 🥧");
 }
 
+test("headless input is authenticated, session-bound, bounded, acknowledged and not replayed", (t) => {
+  const publisher = setup(t);
+  publisher.update({ headless: true, acceptsInput: true, sessionId: "saved-session" });
+  const path = join(publisher.root, "inputs", `${publisher.snapshot.id}.json`);
+  const receipt = join(publisher.root, "inputs", `${publisher.snapshot.id}.result.json`);
+  const messages: string[] = [];
+  const request = { id: "77777777-7777-4777-8777-777777777777", token: publisher.snapshot.token, sessionId: "saved-session", message: "Keep working\n🥧", createdAt: Date.now() };
+  const send = (text: string) => { messages.push(text); };
+  for (const patch of [{ token: "stale" }, { sessionId: "other" }, { createdAt: Date.now() - 11000 }, { createdAt: Date.now() + 1000 }, { message: " " }, { message: "a".repeat(65537) }]) {
+    atomicJSON(path, { ...request, ...patch });
+    publisher.consumeInput(send);
+    assert.deepEqual(messages, []);
+  }
+  atomicJSON(path, request);
+  publisher.consumeInput(send);
+  assert.deepEqual(messages, [request.message]);
+  assert.equal(JSON.parse(readFileSync(receipt, "utf8")).status, "submitted");
+  assert.equal(statSync(receipt).mode & 0o777, 0o600);
+  atomicJSON(path, request);
+  publisher.consumeInput(send);
+  assert.equal(messages.length, 1, "a repeated request must not become another user message");
+  atomicJSON(path, { ...request, id: "88888888-8888-4888-8888-888888888888" });
+  publisher.consumeInput(() => { throw new Error("dispatch failed"); });
+  assert.equal(JSON.parse(readFileSync(receipt, "utf8")).status, "rejected");
+});
+
 test("configuration is strict and previews are bounded Unicode text without terminal controls", () => {
   assert.deepEqual(readConfig({}), { enabled: true, autoStart: true, showOutput: true, defaultDirectory: homedir() });
   assert.deepEqual(readConfig({ overview: { autoStart: false } }), { enabled: true, autoStart: false, showOutput: true, defaultDirectory: homedir() });
